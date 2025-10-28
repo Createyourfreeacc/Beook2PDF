@@ -1,0 +1,686 @@
+"use client"
+
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
+import { ArrowLeft, ArrowRight, ArrowBigDownDash, ArrowUpDown, TextIcon, MoveIcon } from "lucide-react"
+import OrderBar from "@/components/order-bar"
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
+    Select,
+    SelectContent,
+    SelectGroup,
+    SelectItem,
+    SelectLabel,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
+import TocBar from "@/components/toc-bar"
+
+//TODO:
+// ZILPRESOURCE -> ZTOPICDEFINITION & ZISSUE //how to figure out to whom a singe page in resource belongs use 
+// ZILPTOPICPRODUCT -> ZISSUEPRODUCT is the same as the above and links to ZEPRODUCT
+// ZILPTOPIC -> most important, shows pagenumber and also has ZTOPICDEFINITION & ZISSUE
+// ZILPCOURSEDEF -> contains all downloaded courses
+
+// ZILPTOPIC contains pagenumber and if it was deleted and ZTOPICDEFINITION WHICH can be found in ZILPRESOURCE to identify the chapter.
+// ZILPCOURSEDEF = installed books
+
+//ZILPPERMISSIONTYPEDEFINITION contains permissions definitions for dev envirnoment and even pdf download.
+
+//ZISSUE IS A TOPIC GROUP OF A BOOK OR CHAPTER
+
+
+// ##############################################################################
+// ##############################################################################
+// ##############################################################################
+////
+//// THE ZISSUE NUMBER IS THE MOST IMPORTANT! EACH BOOKS CHAPTER HAS A NUMBER
+//// ITS A CHAPTER NUMBER! WITH THIS NUMBER I CAN TIE THE BOOK TO EACH PAGE
+////
+// ##############################################################################
+// ##############################################################################
+// ##############################################################################
+
+type Book = {
+    BookID: string;
+    Titel: string;
+    CourseName: string;
+    Refrence: string;
+    Issue: number[];
+    Toggled: boolean;
+};
+
+export default function bookReader() {
+    const [content, setContent] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string>('');
+    const [currentPage, setCurrentPage] = useState(1);
+    const [maxPage, setMaxPage] = useState(1);
+    const [isProgressVisible, setIsProgressVisible] = useState(false);
+    const [progressClient, setProgressClient] = useState(0);
+    const [muteEvent, setMuteEvent] = useState(false);
+    const [tocHtml, setTocHtml] = useState<{ id: string; content: string }[]>([]);
+    const pageIframeSrc = useMemo(() => buildIframeSrc(content), [content]);
+    const [jobId, setJobId] = useState<string | null>(null);
+    const [currentProfile, setCurrentProfile] = useState<string>('');
+    const [books, setBooks] = useState<Book[]>([]);
+    const [orderBarItems, setOrderBarItems] = useState<{ id: string; content: JSX.Element }[]>([]); // TODO: maybe remove, books already beeing reordered, only here for img
+    const allBooksToggled = orderBarItems.length > 0 && orderBarItems.every(item => books.find(b => b.BookID === item.id)?.Toggled);
+    const someBooksToggled = orderBarItems.some(item => books.find(b => b.BookID === item.id)?.Toggled);
+
+    const muteEventRef = useRef(muteEvent);
+
+    useEffect(() => {
+        muteEventRef.current = muteEvent;
+    }, [muteEvent]);
+
+    useEffect(() => {
+        const jobId = crypto.randomUUID();
+        setJobId(jobId);
+        setProgressClient(0);
+
+        const eventSource = new EventSource(`/api/pdfProgress?jobId=${jobId}`);
+
+        eventSource.onmessage = (event) => {
+            if (!muteEventRef.current) {
+                const progress = parseInt(event.data);
+                setProgressClient(progress);
+            };
+        };
+
+        return () => {
+            eventSource.close();
+        };
+    }, []);
+
+    useEffect(() => {
+        const getBooks = async () => {
+            try {
+                const response = await fetch(`/api/getBooks`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch books');
+                }
+
+                const { booklist, booksymbols } = await response.json();
+
+                setBooks(booklist);
+
+                // Convert booksymbols array to items
+                const items = booksymbols.map((book: any) => ({
+                    id: book.BookID,
+                    content: (
+                        <img
+                            key={book.BookID}
+                            src={book.SymbolImg || '/fallback-icon.png'}
+                            alt={book.CourseName}
+                            width={30}
+                            height={30}
+                            style={{ objectFit: 'contain' }}
+                        />
+                    ),
+                }));
+
+                setOrderBarItems(items);
+            } catch (error) {
+                console.error('Error fetching books:', error);
+            }
+        };
+        getBooks();
+
+        // Fetch last page number from ZTOPIC
+        const fetchMaxPage = async () => {
+            try {
+                const maxTopic = await fetchMaxIntCol("ZTOPIC", "ZILPRESOURCE");
+
+                if (maxTopic.content > 0) {
+                    setMaxPage(maxTopic.content);
+                } else {
+                    console.warn('Could not fetch max page, using fallback: 1');
+                }
+            } catch (err) {
+                console.error('Error fetching max topic:', err);
+            }
+        };
+        fetchMaxPage();
+    }, [currentProfile]);
+
+    useEffect(() => {
+        //TODO REMOVE
+        Object.keys(books).forEach(key => {
+            const book = books[key];
+            console.log(`Book key: ${key}; BookID: ${(book as any)["BookID"]}; CourseName: ${(book as any)["CourseName"]}; Refrence: ${(book as any)["Refrence"]}; Toggled: ${(book as any)["Toggled"]};`);
+            console.log(`Issue: ${(book as any)["Issue"]}`);
+            console.log('-------------------');
+        });
+
+        // Fetch TOC Entries Dynamically
+        const fetchTOCEntries = async () => {
+            try {
+                const response = await fetch(`/api/getTOCEntries`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch TOC entries');
+                }
+                const { entries } = await response.json();
+                const bookTOCs = generateTOCHtml(entries);
+                setTocHtml(bookTOCs);
+            } catch (error) {
+                console.error('Error fetching TOC entries:', error);
+            }
+        };
+
+        // Trigger TOC Fetch on MaxPage Change
+        if (maxPage > 0) {
+            fetchTOCEntries();
+        }
+    }, [books]);
+
+    //TODO remove log
+    useEffect(() => {
+        console.log("Logging books toggle state:");
+        Object.entries(books).forEach(([key, book]) => {
+            console.log(`Book key = ${key}; BookID = ${book.BookID}; Toggled = ${book.Toggled};`);
+        });
+    }, [books]);
+
+    // Function to toggle muteEvent
+    const toggleMuteEvent = () => {
+        setMuteEvent(prev => !prev);
+    };
+
+    const toggleAllBooks = (checked: boolean) => {
+        setBooks(prev => prev.map(book => ({ ...book, Toggled: checked })));
+    };
+
+    const toggleSingleBook = (id: string) => {
+        setBooks(prev =>
+            prev.map(book =>
+                book.BookID === id ? { ...book, Toggled: !book.Toggled } : book
+            )
+        );
+    };
+
+    const generateTOCHtml = (entries: any[]): { id: string; content: JSX.Element }[] => {
+        return books.map(book => {
+            const matchingEntries = entries.filter(entry =>
+                book.Issue.includes(entry.zIssue)
+            );
+
+            matchingEntries.sort((a, b) => {
+                if (a.zIssue !== b.zIssue) return a.zIssue - b.zIssue;
+                if (a.pagenum !== b.pagenum) return a.pagenum - b.pagenum;
+                if (a.zOrder !== b.zOrder) return a.zOrder - b.zOrder;
+                return (a.chapterSection || '').localeCompare(b.chapterSection || '');
+            });
+            const content = (
+                <div style={{ width: '100%', padding: 0, margin: 0, boxSizing: 'border-box' }}>
+                    <h2 style={{ fontSize: '0.9em' }}>{book.Titel}</h2>
+                    <div style={{ fontSize: '0.7em', lineHeight: '2em' }}>
+                        {(() => {
+                            const tocElements = [];
+                            let i = 0;
+
+                            //TODO: BUG: page-number stays on line one if text is too long and wraps around to second line
+                            const createEntryElement = (e) => (
+                                <div
+                                    key={`${e.zpk}`}
+                                    style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        fontWeight: e.zLevel === 1 ? 'bold' : 'normal',
+                                        marginLeft: `${(e.zLevel - 1) * 20}px`,
+                                    }}
+                                >
+                                    <a href={`#${e.chapterSection?.replace(/\s+/g, '-').toLowerCase()}`}>
+                                        {e.chapterSection} {e.title}
+                                    </a>
+                                    <span>{e.pagenum}</span>
+                                </div>
+                            );
+
+                            while (i < matchingEntries.length) {
+                                const entry = matchingEntries[i];
+
+                                // Detect if current entry starts a block
+                                const startsBlock =
+                                    entry.zLevel >= 2 &&
+                                    i + 1 < matchingEntries.length &&
+                                    matchingEntries[i + 1].zLevel >= entry.zLevel;
+
+                                if (startsBlock) {
+                                    const blockElements = [];
+                                    const currentZLevel = entry.zLevel;
+                                    let j = i;
+
+                                    while (
+                                        j < matchingEntries.length &&
+                                        matchingEntries[j].zLevel >= currentZLevel
+                                    ) {
+                                        blockElements.push(createEntryElement(matchingEntries[j]));
+
+                                        const next = matchingEntries[j + 1];
+                                        if (!next || next.zLevel <= 2) break;
+
+                                        j++;
+                                    }
+
+                                    // Look ahead: does the next entry start another block at zLevel 2?
+                                    const nextBlockStarts =
+                                        matchingEntries[j + 1] &&
+                                        matchingEntries[j + 1].zLevel >= 2 &&
+                                        matchingEntries[j + 1].zLevel <= currentZLevel;
+
+                                    tocElements.push(
+                                        <div
+                                            key={`block-${entry.zpk}`}
+                                            style={{
+                                                lineHeight: '1em',
+                                                ...(nextBlockStarts ? { marginBottom: '0.5em' } : {}),
+                                            }}
+                                        >
+                                            {blockElements}
+                                        </div>
+                                    );
+
+                                    i = j + 1; // Move index past the block
+                                } else {
+                                    tocElements.push(createEntryElement(entry));
+                                    i++;
+                                }
+                            }
+
+                            return tocElements;
+                        })()}
+                    </div>
+                </div>
+            );
+
+            return {
+                id: book.BookID,
+                content,
+            };
+        });
+    };
+
+    // Listen for Messages from TOC Iframe
+    useEffect(() => {
+        const handleMessage = (event) => {
+            if (event.data?.page !== undefined) {
+                const newPage = parseInt(event.data.page, 10);
+                if (!isNaN(newPage) && newPage >= 1 && newPage <= maxPage) {
+                    setCurrentPage(newPage);
+                }
+            }
+        };
+
+        window.addEventListener('message', handleMessage);
+        return () => window.removeEventListener('message', handleMessage);
+    }, [maxPage]);
+
+    // Helper: Find the next valid page
+    const findValidPage = async (startPage: number, direction: 'next' | 'prev'): Promise<number | null> => {
+        const step = direction === 'next' ? 1 : -1;
+        const limit = maxPage;
+
+        for (let page = startPage; page >= 1 && page <= limit; page += step) {
+            const { content } = await fetchWebResources("ZTOPIC", "ZTOPIC", page, "ZILPRESOURCE");
+            if (content !== "") {
+                return page;
+            }
+        }
+
+        return null;
+    };
+
+    const loadIframe = async () => {
+        try {
+            const completeHtml = await fetchContentAndSetSrc(currentPage);
+
+            setContent(completeHtml);
+            setLoading(false);
+        } catch (error) {
+            console.error('Error fetching resources:', error);
+            setError('Failed to load content');
+            setLoading(false);
+        }
+    };
+
+    // main content loading logic
+    useEffect(() => {
+        loadIframe();
+    }, [currentPage]);
+
+    const nextPage = async () => {
+        const nextValidPage = await findValidPage(currentPage + 1, 'next');
+        if (nextValidPage !== null) {
+            setCurrentPage(nextValidPage);
+        } else {
+            setCurrentPage(1);
+        }
+    };
+
+    const pageBack = async () => {
+        const prevValidPage = await findValidPage(currentPage - 1, 'prev');
+        if (prevValidPage !== null && prevValidPage >= 1) {
+            setCurrentPage(prevValidPage);
+        } else {
+            setCurrentPage(maxPage);
+        }
+    };
+
+    if (loading) {
+        return <div>Loading...</div>;
+    }
+
+    if (error) {
+        return <div>Error: {error}</div>;
+    }
+
+    // generate a PDF serverside
+    const generatePDF = async () => {
+        try {
+            setMuteEvent(false);
+            setProgressClient(0);
+            setIsProgressVisible(true);
+
+            const responsepdf = await fetch(`/api/generatePdf?jobId=${jobId}&books=${encodeURIComponent(JSON.stringify(books))}`);
+            if (!responsepdf.ok) throw new Error('Failed to generate PDF');
+
+            const blob = await responsepdf.blob();
+            toggleMuteEvent();
+            setProgressClient(98);
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            setProgressClient(99);
+            a.href = url;
+            a.download = 'book.pdf';
+            setProgressClient(100);
+            a.click();
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('PDF generation failed:', error);
+        }
+    };
+
+    return (
+        <div>
+            <div className="flex justify-center space-x-4 mb-4">
+                <div className="flex items-center gap-3">
+                    <Checkbox
+                        id="books"
+                        checked={allBooksToggled}
+                        onCheckedChange={(checked) => toggleAllBooks(!!checked)}
+                        {...(!allBooksToggled && someBooksToggled ? { indeterminate: "true" } : {})}
+                    />
+                    <Label htmlFor="books">Enable all books for download</Label>
+                </div>
+                <div className="w-full flex items-center justify-center gap-3">
+                    {isProgressVisible && <><Progress
+                        value={progressClient}
+                        className="transition duration-700 ease-in-out ..." /><span className="text-sm">{progressClient}%</span></>
+                    }
+                </div>
+                {/*TODO: Flash button red and do nothing if no book is selected*/}
+                <Button variant="outline"
+                    onClick={() => generatePDF()}
+                    type="button"
+                >
+                    <ArrowBigDownDash></ArrowBigDownDash>Download
+                </Button>
+                <Select>
+                    <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Select a Profile" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectGroup>
+                            <SelectLabel>Profiles</SelectLabel>
+                            <SelectItem value="apple">Apple</SelectItem>
+                            <SelectItem value="banana">Banana</SelectItem>
+                            <SelectItem value="blueberry">Blueberry</SelectItem>
+                            <SelectItem value="grapes">Grapes</SelectItem>
+                            <SelectItem value="pineapple">Pineapple</SelectItem>
+                        </SelectGroup>
+                    </SelectContent>
+                </Select>
+                <Button variant="outline"
+                    onClick={pageBack}
+                    type="button"
+                >
+                    <ArrowLeft></ArrowLeft>
+                </Button>
+                <Button variant="outline"
+                    onClick={nextPage}
+                    type="button"
+                >
+                    <ArrowRight></ArrowRight>
+                </Button>
+            </div>
+            <div className="flex flex-row w-full">
+                <div className="inline-block">
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <OrderBar
+                                items={orderBarItems.map(item => ({
+                                    ...item,
+                                    toggled: books.find(b => b.BookID === item.id)?.Toggled || false
+                                }))}
+                                onToggle={toggleSingleBook}
+                                onReorder={(newOrder) => {
+                                    // Reorder books array based on the new order of items
+                                    const reorderedBooks = newOrder.map(item =>
+                                        books.find(book => book.BookID === item.id)
+                                    ).filter(Boolean) as Book[];
+
+                                    // Add any books that might not be in the order bar
+                                    const booksNotInOrderBar = books.filter(book =>
+                                        !newOrder.some(item => item.id === book.BookID)
+                                    );
+
+                                    setBooks([...reorderedBooks, ...booksNotInOrderBar]);
+                                    setOrderBarItems(newOrder);
+                                }}
+                            />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p>Enable & Order</p>
+                        </TooltipContent>
+                    </Tooltip>
+                </div>
+                <div className="w-1"></div>
+                <div className="flex flex-col flex-1 h-full">
+                    {/* TODO: BUG: TocBar doesn't update properly the first time (is shown for 1 sec and then disappears, when site updates
+                                   for example because of a download start, it showns properly )*/}
+                    <TocBar
+                        items={orderBarItems.map(item => {
+                            const tocEntry = tocHtml.find(t => t.id === item.id);
+
+                            return {
+                                ...item,
+                                content: tocEntry?.content || <div>No TOC available</div>,
+                                /* TODO: READ LANGUAGE OF BOOK AN CHANGE TITLE ACCRODINGLY*/
+                                toggled: books.find(b => b.BookID === item.id)?.Toggled || false
+                            };
+                        })}
+                        onToggle={toggleSingleBook}
+                    />
+                </div>
+                <div className="w-1"></div>
+                <iframe
+                    id="page-iframe"
+                    className="w-3/4 h-[800px] border-none" // TODO: remove fixed size
+                    title="Book Reader"
+                    src={pageIframeSrc}
+                    allowFullScreen
+                    width="100%"
+                    height="400px"
+                    style={{
+                        border: 'none',
+                        borderRadius: '8px',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                    }}
+                />
+            </div>
+        </div >
+    );
+}
+
+const fetchContentAndSetSrc = async (pageNumber: number) => {
+    let htmlId = 0;
+    const { content: resulthtmlId } = await fetchWebResources("Z_PK", "ZTOPIC", pageNumber, "ZILPRESOURCE");
+    htmlId = resulthtmlId;
+
+    // If HTML ID is valid, fetch the HTML; otherwise, set fetchedHtml to empty string
+    let fetchedHtml = "";
+    if (htmlId !== null) {
+        const { content: result } = await fetchWebResources("ZDATA", "Z_PK", htmlId, "ZILPRESOURCE");
+        fetchedHtml = result;
+    }
+
+    // Process HTML to replace image sources with data URLs
+    const processedHtml = await replaceImagesInHtml(fetchedHtml);
+
+    // Extract CSS ID from HTML
+    const htmlLines = processedHtml.split('\n');
+    const linkTagLine = htmlLines[4];  // 5th line (0-based index is 4)
+    const hrefMatch = linkTagLine.match(/href=".*\/(\d+)"/);
+    const cssId = hrefMatch ? parseInt(hrefMatch[1]) : null;
+
+    // If CSS ID is valid, fetch the CSS; otherwise, set fetchedCss to empty string
+    let fetchedCss = "";
+    if (cssId !== null) {
+        const { content: result } = await fetchWebResources("ZDATA", "Z_PK", cssId, "ZILPRESOURCE");
+        fetchedCss = result;
+    }
+
+    // Remove everything but the body
+    const lines = processedHtml.split('\n');
+    const modifiedHtml = lines.slice(6, -1)
+        .join('\n')
+        .replace(/^<body\b[^>]*>/i, '')  // Remove opening <body> tag
+        .replace(/<\/body\s*>$/i, '')   // Remove closing </body> tag
+        .trim();                        // Remove any leading/trailing whitespace
+
+    const htmlWithCss = `
+    <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <style>
+                ${fetchedCss}
+            </style>
+        </head>
+        <body>
+            ${modifiedHtml}
+            <script>
+            function scaleContent() {
+                const body = document.body;
+                const html = document.documentElement;
+                
+                // Force layout calculation for Firefox
+                body.style.transform = '';
+                body.offsetHeight; // Trigger reflow
+                
+                const containerWidth = window.innerWidth;
+                const containerHeight = window.innerHeight;
+                const contentWidth = Math.max(body.scrollWidth, body.offsetWidth);
+                const contentHeight = Math.max(body.scrollHeight, body.offsetHeight);
+                
+                const scale = Math.min(
+                    (containerWidth / contentWidth) * 2,
+                    (containerHeight / contentHeight) * 2,
+                    1
+                );
+                
+                if (scale < 1) {
+                    body.style.cssText = "transform: scale(" + scale + "); transform-origin: 0 0; width: " + contentWidth + "px; height: " + contentHeight + "px;";
+                }
+            }
+            
+            window.addEventListener('load', () => setTimeout(scaleContent, 0));
+            </script>
+        </body>
+    </html>
+    `;
+
+    return htmlWithCss;
+};
+
+const buildIframeSrc = (htmlContent: string) => {
+    // Create a Blob from the HTML content
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+
+    // Generate a URL for the Blob
+    return URL.createObjectURL(blob);
+};
+
+// fetch content from DB by ID return json
+const fetchWebResources = async (col1: string, col2: string, id: number, table: string) => {
+    try {
+        const response = await fetch(`/api/getWebResources?col1=${col1}&col2=${col2}&id=${id}&table=${table}`);
+
+        if (!response.ok) {
+            throw new Error(`Fetch error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        if (data && data.content) {
+            return { content: data.content };
+        }
+        return { content: '' };
+    } catch (error) {
+        console.error(`Error fetching web resources for ID ${id}:`, error);
+        return { content: '' };
+    }
+};
+
+// fetch max integer from column 
+const fetchMaxIntCol = async (col: string, table: string) => {
+    try {
+        const response = await fetch(`/api/getMaxIntCol?col=${col}&table=${table}`);
+
+        if (!response.ok) {
+            throw new Error(`Fetch error! status: ${response.status}`);
+        }
+        const data = await response.json();
+
+        if (data && data.content) {
+            return { content: data.content };
+        }
+        return { content: 0 };
+    } catch (error) {
+        console.error(`Error fetching resource`, error);
+        return { content: 0 };
+    }
+};
+
+// Helper function to replace image sources with data URLs
+async function replaceImagesInHtml(html: string): Promise<string> {
+    let modifiedHtml = html;
+    const imgTags = html.match(/<img.*?src=".*?pk\/(\d+)".*?>/gm) || [];
+
+    for (const imgTag of imgTags) {
+        const match = imgTag.match(/src=".*?pk\/(\d+)"/);
+        if (match && match[1]) {
+            const imgId = match[1];
+
+            try {
+                const response = await fetch(`/api/getImage?id=${imgId}`);
+                const imageData = await response.json();
+
+                if (imageData && imageData.data) {
+                    // Replace the src attribute with the data URL
+                    const newImgTag = imgTag.replace(/src=".*?pk\/\d+"/, `src="${imageData.data}"`);
+                    modifiedHtml = modifiedHtml.replace(imgTag, newImgTag);
+                }
+            } catch (error) {
+                console.error('Error loading image:', error);
+            }
+        }
+    }
+
+    return modifiedHtml;
+}

@@ -1,0 +1,133 @@
+"use client"
+
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core"
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import {
+  restrictToVerticalAxis,
+  restrictToParentElement,
+} from "@dnd-kit/modifiers"
+import { CSS } from "@dnd-kit/utilities"
+import { motion } from "framer-motion"
+import { cn } from "@/lib/utils"
+import { Toggle } from "@/components/ui/toggle"
+
+type Item = {
+  id: string
+  content: string | JSX.Element
+  toggled?: boolean
+}
+
+type OrderBarProps = {
+  items: Item[]
+  onReorder?: (newOrder: Item[]) => void
+  onToggle?: (id: string) => void
+}
+
+type SortableItemProps = {
+  id: string
+  content: string | JSX.Element
+  toggled: boolean
+  onToggle: (id: string) => void
+}
+
+function SortableItem({ id, content, toggled, onToggle }: SortableItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  return (
+    <motion.div
+      ref={setNodeRef}
+      style={style}
+      className={cn(isDragging && "opacity-0")}
+      layout={!isDragging}
+      layoutId={!isDragging ? id : undefined}
+      {...attributes}
+      {...listeners}
+    >
+      <Toggle
+        pressed={toggled}
+        onPressedChange={() => onToggle(id)}
+        variant="outline"
+        className={cn(
+          "w-12 h-12 p-0 rounded-lg border shadow-sm transition-colors",
+          "hover:bg-neutral-400 dark:hover:bg-neutral-700",
+          toggled && "bg-accent text-accent-foreground"
+        )}
+      >
+        {content}
+      </Toggle>
+    </motion.div>
+  )
+}
+
+export default function OrderBar({ items: initialItems, onReorder, onToggle }: OrderBarProps) {
+
+  const handleToggle = (id: string) => {
+    onToggle?.(id);
+  };
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    })
+  )
+
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      const oldIndex = initialItems.findIndex((i) => i.id === active.id);
+      const newIndex = initialItems.findIndex((i) => i.id === over.id);
+      const newItems = arrayMove(initialItems, oldIndex, newIndex);
+      onReorder?.(newItems);
+    }
+  };
+
+  return (
+    <div className="bg-background p-2 pl-1 pr-1 border rounded-xl shadow-lg z-50">
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+        modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+      >
+        <SortableContext items={initialItems.map(i => i.id)} strategy={verticalListSortingStrategy}>
+          <div className="flex flex-col gap-2">
+            {initialItems.map((item) => (
+              <SortableItem
+                key={item.id}
+                id={item.id}
+                content={item.content}
+                toggled={!!item.toggled}
+                onToggle={handleToggle}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+    </div>
+  )
+}

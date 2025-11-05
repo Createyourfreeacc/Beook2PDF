@@ -57,7 +57,7 @@ type Book = {
     Toggled: boolean;
 };
 
-export default function bookReader() {
+export default function BookReader() {
     const [content, setContent] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string>('');

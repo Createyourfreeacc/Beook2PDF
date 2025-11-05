@@ -36,12 +36,12 @@ const items = [
   },
   {
     title: "Quiz",
-    url: "#",
+    url: "/quiz",
     icon: Notebook,
   },
   {
-    title: "Bonus Quiz",
-    url: "#",
+    title: "My Quiz",
+    url: "/my-quiz",
     icon: NotebookPen,
   },
   {

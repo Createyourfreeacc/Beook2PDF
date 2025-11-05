@@ -35,7 +35,7 @@ export default function AddQuizQuestionForm() {
         setLoading(true);
         setMessage("");
 
-        const res = await fetch("/api/quiz/addQuestion", {
+        const res = await fetch("/api/quiz/postQuestion", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ question, correctAnswer, wrongAnswers }),
@@ -49,16 +49,15 @@ export default function AddQuizQuestionForm() {
             setQuestion("");
             setCorrectAnswer("");
             setWrongAnswers(["", "", ""]);
+
+            window.dispatchEvent(new CustomEvent("quiz:question-added"));
         } else {
             setMessage(`Error: ${data.error}`);
         }
     };
 
     return (
-        <Card className="max-w-xl mx-auto mt-6 p-4 shadow-lg rounded-2xl">
-            <CardHeader>
-                <CardTitle>Add your own quiz question</CardTitle>
-            </CardHeader>
+        <Card className="h-fit-[28rem]">
             <CardContent>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>

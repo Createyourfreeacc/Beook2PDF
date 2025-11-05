@@ -11,7 +11,7 @@ import { PDFDocument, PDFName, PDFString, PDFArray, PDFNull, PDFDict, PDFRef, PD
 import { setProgress } from '@/lib/progressStore';
 
 const username = os.userInfo().username;
-const DB_PATH = path.resolve(`C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/2/data/beook_book_v6.sqlite`);
+const DB_PATH = path.resolve(`C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/1/data/beook_book_v6.sqlite`);
 
 type Book = {
   BookID: string;

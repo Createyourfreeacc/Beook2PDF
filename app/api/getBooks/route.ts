@@ -5,7 +5,7 @@ import os from 'os';
 import fs from 'fs';
 
 const username = os.userInfo().username;
-const DB_PATH = path.resolve(`C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/2/data/beook_book_v6.sqlite`);
+const DB_PATH = path.resolve(`C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/1/data/beook_book_v6.sqlite`);
 const IMG_PATH = "C:/Users/pilot/AppData/Roaming/ionesoft/beook/release/assetStage/prod/fileSynch"
 
 function findFolderContainingFile(rootDir: string, filename: string): string | null {

@@ -1,4 +1,3 @@
-Beook2PDF ist eine Windows-Software, die es ermöglicht, Inhalte aus der DRM-geschützten Beook-Applikation als PDF zu exportieren.
 Beook2PDF is a Windows App that allows you to export content from the DRM-protected Beook application as PDF.
 
 

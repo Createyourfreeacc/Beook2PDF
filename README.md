@@ -14,7 +14,7 @@ Gets the raw, unencrypted html and css for each page of any book from the Beook 
 - Only tested for BAK Aviation learning material
 - Uses Puppeteer to convert HTML/CSS to PDF (Bad AI slop solution)
 
-Quiz is answers and questions are now decrypted but not yet added to the pdf.
+Quiz answers and questions are now decrypted but not yet added to the pdf.
 
 
 ## Getting Started

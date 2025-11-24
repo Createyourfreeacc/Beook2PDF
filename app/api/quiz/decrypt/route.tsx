@@ -1,5 +1,5 @@
 // ==========================================================================
-// /app/api/decryptquiz/route.ts
+// /app/api/route.ts
 // ==========================================================================
 //
 // This route decrypts encrypted answer & question strings from the SQLite
@@ -136,6 +136,48 @@ function decryptStoredAnswer(stored: string) {
 }
 
 // ==========================================================================
+// Helper: parse decrypted answer payload "0=d) 50’000 m"
+//
+// "0=d) 50’000 m" →
+//   isCorrect = 0
+//   letter    = "d"
+//   text      = "50’000 m"
+//
+// We keep ZTEXT_DECRYPTED as the full plaintext and add:
+//   ZCORRECT_DECRYPTED, ZANSWER_LETTER, ZANSWER_TEXT
+// ==========================================================================
+function parseDecryptedAnswerPayload(plaintext: string | null): {
+  isCorrect: number | null;
+  letter: string | null;
+  text: string | null;
+} {
+  if (!plaintext) {
+    return { isCorrect: null, letter: null, text: null };
+  }
+
+  const trimmed = plaintext.trim();
+  const match = /^([01])=([a-zA-Z])\)\s*(.*)$/.exec(trimmed);
+
+  if (!match) {
+    // Not in the expected "0=a) text" format.
+    // Still return the full text as ZANSWER_TEXT if non-empty.
+    return {
+      isCorrect: null,
+      letter: null,
+      text: trimmed.length > 0 ? trimmed : null,
+    };
+  }
+
+  const [, flag, letter, rest] = match;
+
+  return {
+    isCorrect: flag === "1" ? 1 : 0,
+    letter,
+    text: rest.trim().length > 0 ? rest.trim() : null,
+  };
+}
+
+// ==========================================================================
 // GET handler: reads every row from ZILPANSWER and ZILPQUESTION,
 // decrypts all encrypted rows, and writes results into mirror tables
 // ZILPANSWER_DECRYPTED and ZILPQUESTION_DECRYPTED.
@@ -190,18 +232,38 @@ export async function GET() {
 
     // Adds our own decrypted text + id columns if missing
     try {
-      db.exec(`ALTER TABLE ZILPANSWER_DECRYPTED ADD COLUMN ZTEXT_DECRYPTED TEXT;`);
+      db.exec(
+        `ALTER TABLE ZILPANSWER_DECRYPTED ADD COLUMN ZTEXT_DECRYPTED TEXT;`
+      );
     } catch {}
     try {
       db.exec(`ALTER TABLE ZILPANSWER_DECRYPTED ADD COLUMN ZIDSTRING TEXT;`);
     } catch {}
 
+    // Additional parsed columns:
+    //  - ZCORRECT_DECRYPTED : 0/1 from the first char
+    //  - ZANSWER_LETTER     : "a"/"b"/"c"/"d"
+    //  - ZANSWER_TEXT       : answer text without the flag/letter prefix
+    try {
+      db.exec(
+        `ALTER TABLE ZILPANSWER_DECRYPTED ADD COLUMN ZCORRECT_DECRYPTED INTEGER;`
+      );
+    } catch {}
+    try {
+      db.exec(
+        `ALTER TABLE ZILPANSWER_DECRYPTED ADD COLUMN ZANSWER_LETTER TEXT;`
+      );
+    } catch {}
+    try {
+      db.exec(`ALTER TABLE ZILPANSWER_DECRYPTED ADD COLUMN ZANSWER_TEXT TEXT;`);
+    } catch {}
+
     const answerPlaceholders =
       answerColNames.map((n: string) => `@${n}`).join(", ") +
-      ", @ZTEXT_DECRYPTED, @ZIDSTRING";
+      ", @ZTEXT_DECRYPTED, @ZIDSTRING, @ZCORRECT_DECRYPTED, @ZANSWER_LETTER, @ZANSWER_TEXT";
 
     const answerInsertStmt = db.prepare(
-      `INSERT INTO ZILPANSWER_DECRYPTED (${answerBaseCols}, ZTEXT_DECRYPTED, ZIDSTRING)
+      `INSERT INTO ZILPANSWER_DECRYPTED (${answerBaseCols}, ZTEXT_DECRYPTED, ZIDSTRING, ZCORRECT_DECRYPTED, ZANSWER_LETTER, ZANSWER_TEXT)
        VALUES (${answerPlaceholders})`
     );
 
@@ -221,6 +283,9 @@ export async function GET() {
         const raw = typeof row.ZTEXT === "string" ? row.ZTEXT : null;
         let ZTEXT_DECRYPTED: string | null = null;
         let ZIDSTRING: string | null = null;
+        let ZCORRECT_DECRYPTED: number | null = null;
+        let ZANSWER_LETTER: string | null = null;
+        let ZANSWER_TEXT: string | null = null;
 
         // detect encrypted strings
         if (raw && (raw.startsWith("AT$") || raw.startsWith("QT$"))) {
@@ -230,6 +295,13 @@ export async function GET() {
           if (plaintext !== null) {
             ZTEXT_DECRYPTED = plaintext;
             ZIDSTRING = idString;
+
+            // parse "0=d) 50’000 m" into separate fields
+            const parsed = parseDecryptedAnswerPayload(plaintext);
+            ZCORRECT_DECRYPTED = parsed.isCorrect;
+            ZANSWER_LETTER = parsed.letter;
+            ZANSWER_TEXT = parsed.text;
+
             answerDecrypted++;
           } else {
             answerPrefixButFailed++;
@@ -240,6 +312,9 @@ export async function GET() {
           ...row,
           ZTEXT_DECRYPTED,
           ZIDSTRING,
+          ZCORRECT_DECRYPTED,
+          ZANSWER_LETTER,
+          ZANSWER_TEXT,
         });
       }
     });

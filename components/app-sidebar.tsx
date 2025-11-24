@@ -46,13 +46,8 @@ const items = [
   },
   {
     title: "Settings",
-    url: "#",
+    url: "/settings",
     icon: Settings,
-  },
-  {
-    title: "Lorem",
-    url: "/lorem-ipsum",
-    icon: ALargeSmall,
   },
 ]
 

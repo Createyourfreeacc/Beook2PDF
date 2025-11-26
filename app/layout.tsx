@@ -8,7 +8,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Beook To Pdf",
+  title: "Beook2Pdf",
   description: "Export any Content in Beook to a PDF",
   icons: {
     icon: '/favicon.ico',
@@ -33,7 +33,7 @@ export default async function RootLayout({ children }:
             enableSystem
             disableTransitionOnChange
           >
-            <SidebarProvider>
+            <SidebarProvider defaultOpen={defaultOpen}>
               <AppSidebar />
               <main className="flex flex-1 flex-col gap-4 w-full h-screen">
                 <div className="relative px-4 py-3 bg-secondary text-primary-background flex items-center h-14">

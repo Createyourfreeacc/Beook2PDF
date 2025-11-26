@@ -82,7 +82,7 @@ export default function QuizPage() {
       }
       setStatus(
         `Decrypted A: ${data.answerDecryptedRows}/${data.answerProcessedRows} | ` +
-          `Q: ${data.questionDecryptedRows}/${data.questionProcessedRows}`
+        `Q: ${data.questionDecryptedRows}/${data.questionProcessedRows}`
       );
       return true;
     } catch (err) {
@@ -125,6 +125,9 @@ export default function QuizPage() {
   }, []);
 
   function setAnswer(questionId: number, answerId: number | null) {
+    // Do not allow changing answers while solutions are visible
+    if (showSolutions) return;
+
     setUserAnswers((prev) => ({
       ...prev,
       [questionId]: answerId,
@@ -166,7 +169,18 @@ export default function QuizPage() {
             <Button
               variant={showSolutions ? "secondary" : "default"}
               size="sm"
-              onClick={() => setShowSolutions((prev) => !prev)}
+              onClick={() => {
+                setShowSolutions((prev) => {
+                  const next = !prev;
+
+                  // When hiding solutions, reset all user choices
+                  if (!next) {
+                    setUserAnswers({});
+                  }
+
+                  return next;
+                });
+              }}
               disabled={books.length === 0}
             >
               {showSolutions ? "hide solution" : "show solution"}
@@ -239,7 +253,7 @@ export default function QuizPage() {
                       <AccordionTrigger className="px-4">
                         <div className="flex flex-col items-start gap-1">
                           <span className="font-medium">
-                            {chapter.title || "Kapitel"}
+                            {chapter.title || "Chapter"}
                           </span>
                           <span className="text-xs text-muted-foreground">
                             {chapter.questions.length} Question
@@ -321,18 +335,15 @@ export default function QuizPage() {
                                               <span className="text-sm">{a.text}</span>
                                               {showSolutions && (
                                                 <>
-                                                  {isCorrect && (
-                                                    <Badge
-                                                      variant="outline"
-                                                      className="text-[10px]"
-                                                    >
-                                                      correct
-                                                    </Badge>
-                                                  )}
                                                   {feedback && (
                                                     <Badge
                                                       variant="secondary"
-                                                      className="text-[10px]"
+                                                      className={`text-[10px] ${showSolutions && selected && isCorrect
+                                                          ? "bg-green-400 text-black"
+                                                          : showSolutions && selected && !isCorrect
+                                                            ? "bg-red-400 text-black"
+                                                            : ""
+                                                        }`}
                                                     >
                                                       {feedback}
                                                     </Badge>

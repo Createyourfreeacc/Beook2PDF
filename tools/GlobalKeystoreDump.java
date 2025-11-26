@@ -30,7 +30,7 @@ import javax.crypto.SecretKey;
  *
  * Usage:
  *   javac GlobalKeystoreDump.java
- *   java GlobalKeystoreDump "C:\Users\pilot\AppData\Roaming\ionesoft\beook\.global.keystore"
+ *   java GlobalKeystoreDump "C:\Users\${username}\AppData\Roaming\ionesoft\beook\.global.keystore"
  */
 public class GlobalKeystoreDump {
 

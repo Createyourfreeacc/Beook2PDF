@@ -31,7 +31,7 @@ type QuizAnswer = {
   id: number;
   number: number;
   text: string;
-  isCorrect: boolean | null; // now derived from ZCORRECT_DECRYPTED
+  isCorrect: boolean | null; // derived from ZCORRECT_DECRYPTED
 };
 
 type QuizQuestion = {

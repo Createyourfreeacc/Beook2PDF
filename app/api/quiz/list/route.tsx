@@ -16,8 +16,16 @@ type RawRow = {
   bookTitle: string;
   bookRef: string | null;
 
+  // Real chapter (book chapter / issue product)
+  chapterId: number;
+  chapterTitle: string | null;
+  chapterRef: string | null;
+  issueId: string | null;
+
+  // Exercise inside the chapter
   exerciseId: number;
   exerciseTitle: string | null;
+  exerciseCode: string | null; // ZEXERCISEID like "010-3.3-02"
 
   questionId: number;
   questionRef: string | null;
@@ -66,49 +74,73 @@ export async function GET() {
     const rows = db
       .prepare<[], RawRow>(
         `
-        SELECT
-          p.Z_PK                         AS bookId,
-          p.ZTITLE                       AS bookTitle,
-          p.ZPRODUCTREFERENCE            AS bookRef,
+    SELECT
+      -- Book (course product)
+      p.Z_PK                         AS bookId,
+      p.ZTITLE                       AS bookTitle,
+      p.ZPRODUCTREFERENCE            AS bookRef,
 
-          ex.Z_PK                        AS exerciseId,
-          ex.ZTITLE                      AS exerciseTitle,
+      -- Real chapter (issue product → ZILPEPRODUCT)
+      chap.Z_PK                      AS chapterId,
+      chap.ZTITLE                    AS chapterTitle,
+      chap.ZPRODUCTREFERENCE         AS chapterRef,
+      issue.ZISSUEID                 AS issueId,
 
-          q.Z_PK                         AS questionId,
-          q.ZREFERENCE                   AS questionRef,
-          qd.ZTEXT_DECRYPTED             AS questionText,
+      -- Exercise (inside chapter)
+      ex.Z_PK                        AS exerciseId,
+      ex.ZTITLE                      AS exerciseTitle,
+      ex.ZEXERCISEID                 AS exerciseCode,
 
-          ans.Z_PK                       AS answerId,
-          ans.ZNUMBER                    AS answerNumber,
-          ans.ZANSWER_TEXT               AS answerText,
-          ans.ZCORRECT_DECRYPTED         AS answerIsCorrect
+      -- Question
+      q.Z_PK                         AS questionId,
+      q.ZREFERENCE                   AS questionRef,
+      qd.ZTEXT_DECRYPTED             AS questionText,
 
-        FROM ZILPQUESTION_DECRYPTED qd
-        JOIN ZILPQUESTION q
-          ON q.Z_PK = qd.Z_PK
+      -- Answer
+      ans.Z_PK                       AS answerId,
+      ans.ZNUMBER                    AS answerNumber,
+      ans.ZANSWER_TEXT               AS answerText,
+      ans.ZCORRECT_DECRYPTED         AS answerIsCorrect
 
-        JOIN ZILPEXERCISE ex
-          ON ex.Z_PK = q.ZEXERCISE
+    FROM ZILPQUESTION_DECRYPTED qd
+    JOIN ZILPQUESTION q
+      ON q.Z_PK = qd.Z_PK
 
-        JOIN ZILPTOPICDEFINITION td
-          ON td.Z_PK = ex.ZTOPICDEFINITION
+    JOIN ZILPEXERCISE ex
+      ON ex.Z_PK = q.ZEXERCISE
 
-        JOIN ZILPCOURSEPRODUCT cp
-          ON td.ZRELATIVEFILEPATH LIKE '%' || '/courses/' || cp.ZCOURSEIDENTIFIER || '/' || '%'
+    -- Link exercise → issue (chapter)
+    JOIN ZILPISSUEDEF issue
+      ON issue.Z_PK = ex.ZISSUE
 
-        JOIN ZILPEPRODUCT p
-          ON p.Z_PK = cp.ZEPRODUCT
+    -- Map issue → issue-product → chapter product
+    JOIN ZILPISSUEPRODUCT ip
+      ON ip.ZISSUEPRODUCT = issue.ZISSUEPRODUCT
 
-        LEFT JOIN ZILPANSWER_DECRYPTED ans
-          ON ans.ZQUESTION = q.Z_PK
-         AND ans.ZTYPE = 3  -- only real answer options
+    JOIN ZILPEPRODUCT chap
+      ON chap.Z_PK = ip.ZEPRODUCT
 
-        ORDER BY
-          p.ZTITLE,
-          ex.ZTITLE,
-          q.ZREFERENCE,
-          ans.ZNUMBER
-        `
+    -- Existing course/product join (book)
+    JOIN ZILPTOPICDEFINITION td
+      ON td.Z_PK = ex.ZTOPICDEFINITION
+
+    JOIN ZILPCOURSEPRODUCT cp
+      ON td.ZRELATIVEFILEPATH LIKE '%' || '/courses/' || cp.ZCOURSEIDENTIFIER || '/' || '%'
+
+    JOIN ZILPEPRODUCT p
+      ON p.Z_PK = cp.ZEPRODUCT
+
+    LEFT JOIN ZILPANSWER_DECRYPTED ans
+      ON ans.ZQUESTION = q.Z_PK
+     AND ans.ZTYPE = 3  -- only real answer options
+
+    ORDER BY
+      p.ZTITLE,
+      chap.ZTITLE,
+      ex.ZEXERCISEID,
+      q.ZREFERENCE,
+      ans.ZNUMBER
+    `
       )
       .all();
 
@@ -158,15 +190,19 @@ export async function GET() {
         booksMap.set(row.bookId, book);
       }
 
-      // Chapter = exercise
-      let chapter = book.chapters.get(row.exerciseId);
+      // Chapter = actual book chapter (issue product)
+      let chapter = book.chapters.get(row.chapterId);
       if (!chapter) {
         chapter = {
-          id: row.exerciseId,
-          title: row.exerciseTitle ?? "Unbenannter Abschnitt",
+          id: row.chapterId,
+          // Prefer the real chapter title, fall back to issueId or generic
+          title:
+            row.chapterTitle ??
+            row.issueId ??
+            "Unbenannter Abschnitt",
           questions: new Map(),
         };
-        book.chapters.set(row.exerciseId, chapter);
+        book.chapters.set(row.chapterId, chapter);
       }
 
       // Question
@@ -215,7 +251,7 @@ export async function GET() {
   } catch (err: any) {
     try {
       db.close();
-    } catch {}
+    } catch { }
     return NextResponse.json(
       { error: "Failed to read quiz data", details: String(err) },
       { status: 500 }

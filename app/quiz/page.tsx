@@ -257,7 +257,7 @@ export default function QuizPage() {
                           </span>
                           <span className="text-xs text-muted-foreground">
                             {chapter.questions.length} Question
-                            {chapter.questions.length !== 1 && "n"}
+                            {chapter.questions.length !== 1 && "s"}
                           </span>
                         </div>
                       </AccordionTrigger>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Tabs,
@@ -26,6 +26,7 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from "@/components/ui/radio-group";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 type QuizAnswer = {
   id: number;
@@ -70,6 +71,39 @@ export default function QuizPage() {
   const [userAnswers, setUserAnswers] = useState<
     Record<number, number | null>
   >({});
+
+  const tabsScrollRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  function updateScrollIndicators() {
+    const el = tabsScrollRef.current;
+    if (!el) return;
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+
+    setCanScrollLeft(scrollLeft > 0);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 1);
+  }
+
+  function scrollTabsBy(delta: number) {
+    const el = tabsScrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: delta, behavior: "smooth" });
+  }
+
+  // handle window resize once the component is mounted
+  useEffect(() => {
+    const onResize = () => updateScrollIndicators();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // re-evaluate scroll indicators whenever books or selected book change
+  useEffect(() => {
+    updateScrollIndicators();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [books.length, selectedBookId]);
 
   async function runDecrypt() {
     setStatus("Decrypting questions and answers...");
@@ -211,17 +245,63 @@ export default function QuizPage() {
           onValueChange={(val) => setSelectedBookId(Number(val))}
           className="space-y-4"
         >
-          <TabsList className="flex flex-wrap w-full justify-start">
-            {books.map((book) => (
-              <TabsTrigger
-                key={book.id}
-                value={book.id.toString()}
-                className="whitespace-nowrap"
+          {/* horizontally scrollable books bar with wheel + arrow support */}
+          <div className="relative w-full rounded-md overflow-hidden">
+            {/* left fade indicator */}
+            {canScrollLeft && (
+              <button
+                type="button"
+                className="scroll-indicator-left cursor-pointer select-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0"
+                onClick={() => scrollTabsBy(-200)}
+                aria-label="Scroll books left"
               >
-                {book.title}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+                <ChevronLeft
+                  className="h-4 w-4 text-foreground" // <— solid, no opacity
+                  aria-hidden="true"
+                  strokeWidth={3}
+                />
+              </button>
+            )}
+
+            {canScrollRight && (
+              <button
+                type="button"
+                className="scroll-indicator-right cursor-pointer select-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0"
+                onClick={() => scrollTabsBy(200)}
+                aria-label="Scroll books right"
+              >
+                <ChevronRight
+                  className="h-4 w-4 text-foreground" // or "text-white" if you want
+                  aria-hidden="true"
+                  strokeWidth={3}
+                />
+              </button>
+            )}
+
+            <div
+              ref={tabsScrollRef}
+              className="w-full overflow-x-auto overflow-y-hidden scrollbar-hide"
+              onWheel={(e) => {
+                if (e.deltaY === 0) return;
+                e.preventDefault();
+                e.currentTarget.scrollLeft += e.deltaY;
+                updateScrollIndicators();
+              }}
+              onScroll={updateScrollIndicators}
+            >
+              <TabsList className="inline-flex min-w-max justify-start">
+                {books.map((book) => (
+                  <TabsTrigger
+                    key={book.id}
+                    value={book.id.toString()}
+                    className="whitespace-nowrap"
+                  >
+                    {book.title}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
+          </div>
 
           {books.map((book) => (
             <TabsContent
@@ -339,10 +419,10 @@ export default function QuizPage() {
                                                     <Badge
                                                       variant="secondary"
                                                       className={`text-[10px] ${showSolutions && selected && isCorrect
-                                                          ? "bg-green-400 text-black"
-                                                          : showSolutions && selected && !isCorrect
-                                                            ? "bg-red-400 text-black"
-                                                            : ""
+                                                        ? "bg-green-400 text-black"
+                                                        : showSolutions && selected && !isCorrect
+                                                          ? "bg-red-400 text-black"
+                                                          : ""
                                                         }`}
                                                     >
                                                       {feedback}

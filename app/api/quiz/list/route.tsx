@@ -12,11 +12,12 @@ const DB_PATH = path.resolve(
 );
 
 type RawRow = {
-  bookId: number;
-  bookTitle: string;
-  bookRef: string | null;
+  // Canonical book (course) – aligned with /api/getBooks
+  bookId: number;              // ZILPCOURSEDEF.Z_PK
+  bookCourseId: string | null; // ZILPCOURSEDEF.ZCOURSEID (e.g. "PPL020H")
+  bookRef: string | null;      // ZILPCOURSEDEF.ZREFERENCE
 
-  // Real chapter (book chapter / issue product)
+  // Real chapter (issue product)
   chapterId: number;
   chapterTitle: string | null;
   chapterRef: string | null;
@@ -27,10 +28,12 @@ type RawRow = {
   exerciseTitle: string | null;
   exerciseCode: string | null; // ZEXERCISEID like "010-3.3-02"
 
+  // Question
   questionId: number;
   questionRef: string | null;
   questionText: string | null;
 
+  // Answer
   answerId: number | null;
   answerNumber: number | null;
   answerText: string | null;        // from ZANSWER_TEXT
@@ -68,81 +71,148 @@ export async function GET() {
   }
 
   try {
+    // --------------------------------------------------------------------
+    // Canonical books (courses), same base as /api/getBooks
+    // --------------------------------------------------------------------
+    // Map courseId -> array of localized titles (from ZILPCOURSESERIES)
+    const titleRows = db
+      .prepare(
+        `
+        SELECT "ZCOURSEIDENTIFIER", "ZTITLE"
+        FROM "ZILPCOURSESERIES"
+        WHERE "ZCOURSEIDENTIFIER" IS NOT NULL
+          AND "ZTITLE" IS NOT NULL
+        `
+      )
+      .all();
+
+    const courseIdToTitles = new Map<string, string[]>();
+    for (const row of titleRows as any[]) {
+      const courseId = row["ZCOURSEIDENTIFIER"]?.toString() ?? "";
+      const title = row["ZTITLE"]?.toString() ?? "";
+      if (!courseId || !title) continue;
+      const arr = courseIdToTitles.get(courseId) ?? [];
+      arr.push(title);
+      courseIdToTitles.set(courseId, arr);
+    }
+
+    // Map canonical bookId (ZILPCOURSEDEF.Z_PK) -> book meta
+    const courseDefRows = db
+      .prepare(
+        `
+        SELECT
+          "Z_PK"          AS bookId,
+          "ZCOURSEID"     AS courseId,
+          "ZREFERENCE"    AS courseRef
+        FROM "ZILPCOURSEDEF"
+        WHERE "Z_PK" IS NOT NULL
+        `
+      )
+      .all() as any[];
+
+    const canonicalBooks = new Map<
+      number,
+      { id: number; title: string; courseId: string | null; ref: string | null }
+    >();
+
+    for (const row of courseDefRows) {
+      const id = Number(row.bookId);
+      const courseId: string | null =
+        row.courseId != null ? String(row.courseId) : null;
+      const ref: string | null =
+        row.bookRef != null ? String(row.bookRef) : null;
+
+      const titles = courseId ? courseIdToTitles.get(courseId) : undefined;
+      const title =
+        titles?.[0] ??
+        courseId ??
+        ref ??
+        `Book ${id}`;
+
+      canonicalBooks.set(id, {
+        id,
+        title,
+        courseId,
+        ref,
+      });
+    }
+
     // Pull **decrypted** questions & answers and map them to book/exercise
     // NOTE: assumes /api/quiz/decrypt has already created and populated:
     //   ZILPQUESTION_DECRYPTED, ZILPANSWER_DECRYPTED
     const rows = db
       .prepare<[], RawRow>(
         `
-    SELECT
-      -- Book (course product)
-      p.Z_PK                         AS bookId,
-      p.ZTITLE                       AS bookTitle,
-      p.ZPRODUCTREFERENCE            AS bookRef,
+        SELECT
+          -- Canonical book (course)
+          cd."Z_PK"               AS bookId,
+          cd."ZCOURSEID"          AS bookCourseId,
+          cd."ZREFERENCE"         AS bookRef,
 
-      -- Real chapter (issue product → ZILPEPRODUCT)
-      chap.Z_PK                      AS chapterId,
-      chap.ZTITLE                    AS chapterTitle,
-      chap.ZPRODUCTREFERENCE         AS chapterRef,
-      issue.ZISSUEID                 AS issueId,
+          -- Real chapter (issue product)
+          chap."Z_PK"             AS chapterId,
+          chap."ZTITLE"           AS chapterTitle,
+          chap."ZPRODUCTREFERENCE" AS chapterRef,
+          issue."ZISSUEID"        AS issueId,
 
-      -- Exercise (inside chapter)
-      ex.Z_PK                        AS exerciseId,
-      ex.ZTITLE                      AS exerciseTitle,
-      ex.ZEXERCISEID                 AS exerciseCode,
+          -- Exercise
+          ex."Z_PK"               AS exerciseId,
+          ex."ZTITLE"             AS exerciseTitle,
+          ex."ZEXERCISEID"        AS exerciseCode,
 
-      -- Question
-      q.Z_PK                         AS questionId,
-      q.ZREFERENCE                   AS questionRef,
-      qd.ZTEXT_DECRYPTED             AS questionText,
+          -- Question
+          q."Z_PK"                AS questionId,
+          q."ZREFERENCE"          AS questionRef,
+          qd."ZTEXT_DECRYPTED"    AS questionText,
 
-      -- Answer
-      ans.Z_PK                       AS answerId,
-      ans.ZNUMBER                    AS answerNumber,
-      ans.ZANSWER_TEXT               AS answerText,
-      ans.ZCORRECT_DECRYPTED         AS answerIsCorrect
+          -- Answer
+          ans."Z_PK"              AS answerId,
+          ans."ZNUMBER"           AS answerNumber,
+          ans."ZANSWER_TEXT"      AS answerText,
+          ans."ZCORRECT_DECRYPTED" AS answerIsCorrect
 
-    FROM ZILPQUESTION_DECRYPTED qd
-    JOIN ZILPQUESTION q
-      ON q.Z_PK = qd.Z_PK
+        FROM ZILPQUESTION_DECRYPTED qd
+        JOIN ZILPQUESTION q
+          ON q."Z_PK" = qd."Z_PK"
 
-    JOIN ZILPEXERCISE ex
-      ON ex.Z_PK = q.ZEXERCISE
+        JOIN ZILPEXERCISE ex
+          ON ex."Z_PK" = q."ZEXERCISE"
 
-    -- Link exercise → issue (chapter)
-    JOIN ZILPISSUEDEF issue
-      ON issue.Z_PK = ex.ZISSUE
+        -- Link exercise -> issue (chapter)
+        JOIN ZILPISSUEDEF issue
+          ON issue."Z_PK" = ex."ZISSUE"
 
-    -- Map issue → issue-product → chapter product
-    JOIN ZILPISSUEPRODUCT ip
-      ON ip.ZISSUEPRODUCT = issue.ZISSUEPRODUCT
+        -- Map issue -> issue-product -> chapter product
+        JOIN ZILPISSUEPRODUCT ip
+          ON ip."ZISSUEPRODUCT" = issue."ZISSUEPRODUCT"
 
-    JOIN ZILPEPRODUCT chap
-      ON chap.Z_PK = ip.ZEPRODUCT
+        JOIN ZILPEPRODUCT chap
+          ON chap."Z_PK" = ip."ZEPRODUCT"
 
-    -- Existing course/product join (book)
-    JOIN ZILPTOPICDEFINITION td
-      ON td.Z_PK = ex.ZTOPICDEFINITION
+        -- Map exercise -> course product -> course def (canonical book)
+        JOIN ZILPTOPICDEFINITION td
+          ON td."Z_PK" = ex."ZTOPICDEFINITION"
 
-    JOIN ZILPCOURSEPRODUCT cp
-      ON td.ZRELATIVEFILEPATH LIKE '%' || '/courses/' || cp.ZCOURSEIDENTIFIER || '/' || '%'
+        JOIN ZILPCOURSEPRODUCT cp
+          ON td."ZRELATIVEFILEPATH" LIKE '%' || '/courses/' || cp."ZCOURSEIDENTIFIER" || '/' || '%'
 
-    JOIN ZILPEPRODUCT p
-      ON p.Z_PK = cp.ZEPRODUCT
+        JOIN ZILPCOURSEDEF cd
+          ON cd."ZREFERENCE" = cp."ZCOURSEREFERENCE"
 
-    LEFT JOIN ZILPANSWER_DECRYPTED ans
-      ON ans.ZQUESTION = q.Z_PK
-     AND ans.ZTYPE = 3  -- only real answer options
+        LEFT JOIN ZILPANSWER_DECRYPTED ans
+          ON ans."ZQUESTION" = q."Z_PK"
+         AND ans."ZTYPE" = 3  -- only real answer options
 
-    ORDER BY
-      p.ZTITLE,
-      chap.ZTITLE,
-      ex.ZEXERCISEID,
-      q.ZREFERENCE,
-      ans.ZNUMBER
-    `
+        ORDER BY
+          cd."ZCOURSEID",
+          chap."ZTITLE",
+          ex."ZEXERCISEID",
+          q."ZREFERENCE",
+          ans."ZNUMBER"
+        `
       )
       .all();
+
 
     db.close();
 
@@ -178,13 +248,21 @@ export async function GET() {
     >();
 
     for (const row of rows) {
-      // Book
+      // Book (canonical course def)
       let book = booksMap.get(row.bookId);
       if (!book) {
+        const canonical = canonicalBooks.get(row.bookId);
+
         book = {
           id: row.bookId,
-          title: row.bookTitle,
-          ref: row.bookRef,
+          title:
+            canonical?.title ??
+            row.bookCourseId ??
+            "Unknown Book",
+          ref:
+            canonical?.ref ??
+            row.bookRef ??
+            row.bookCourseId,
           chapters: new Map(),
         };
         booksMap.set(row.bookId, book);
@@ -199,7 +277,7 @@ export async function GET() {
           title:
             row.chapterTitle ??
             row.issueId ??
-            "Unbenannter Abschnitt",
+            "Unknown Chapter",
           questions: new Map(),
         };
         book.chapters.set(row.chapterId, chapter);
@@ -227,6 +305,18 @@ export async function GET() {
             row.answerIsCorrect === null
               ? null
               : row.answerIsCorrect === 1,
+        });
+      }
+    }
+
+    // Ensure all canonical books exist, even if they have no exercises
+    for (const canonical of canonicalBooks.values()) {
+      if (!booksMap.has(canonical.id)) {
+        booksMap.set(canonical.id, {
+          id: canonical.id,
+          title: canonical.title,
+          ref: canonical.ref,
+          chapters: new Map(),
         });
       }
     }

@@ -116,9 +116,11 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
+
   :root {
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
@@ -140,4 +142,72 @@
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.439 0 0);
   }
+}
+
+/* Hide scrollbar cross-browser */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  /* IE / Edge */
+  scrollbar-width: none;
+  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+  /* Chrome / Safari */
+}
+
+.scroll-indicator-left,
+.scroll-indicator-right {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  z-index: 10;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+/* left fade */
+.scroll-indicator-left {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.25) 0%,     /* softer start */
+    rgba(0, 0, 0, 0.15) 20%,    /* smoother mid fade */
+    transparent 80%            /* fade out before edge */
+  );
+}
+
+.scroll-indicator-right {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0.25) 0%,
+    rgba(0, 0, 0, 0.15) 20%,
+    transparent 80%
+  );
+}
+
+
+/* slightly stronger fade on hover – keep directions per side */
+.scroll-indicator-left:hover {
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.35) 0%,
+    rgba(0, 0, 0, 0.20) 25%,
+    transparent 90%
+  );
+}
+
+.scroll-indicator-right:hover {
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0.35) 0%,
+    rgba(0, 0, 0, 0.20) 25%,
+    transparent 90%
+  );
 }

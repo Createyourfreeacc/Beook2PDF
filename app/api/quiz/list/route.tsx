@@ -12,10 +12,10 @@ const DB_PATH = path.resolve(
 );
 
 type RawRow = {
-  // Canonical book (course)
-  bookId: number;              // ZILPCOURSEDEF.Z_PK
-  bookCourseId: string | null; // ZILPCOURSEDEF.ZCOURSEID
-  bookRef: string | null;      // ZILPCOURSEDEF.ZREFERENCE
+  // Book
+  bookId: number;
+  bookCourseId: string | null;
+  bookRef: string | null;
 
   // Chapter (issue product)
   chapterId: number;
@@ -37,7 +37,7 @@ type RawRow = {
   answerId: number | null;
   answerNumber: number | null;
   answerText: string | null;
-  answerIsCorrect: number | null; // 0/1 or null
+  answerIsCorrect: number | null;
 };
 
 type AssetRow = {
@@ -47,12 +47,18 @@ type AssetRow = {
   data: Buffer | null;
 };
 
+type Asset = {
+  id: number;
+  mediaType: string;
+  dataUrl: string;
+};
+
 function cleanQuestionText(text: string | null): string {
   if (!text) return "";
   return text
-    .replace(/\$\{answerBlock\}/g, "")   // remove placeholder
+    .replace(/\$\{answerBlock\}/g, "")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/?[^>]+>/g, "")          // strip other HTML
+    .replace(/<\/?[^>]+>/g, "")
     .trim();
 }
 
@@ -64,7 +70,7 @@ function cleanAnswerText(text: string | null): string {
     .trim();
 }
 
-// For sorting chapters "1 Foo", "2 Bar", "10 Baz" by the leading number
+// For sorting chapters "1 Foo", "10 Bar" numerically by the prefix
 function extractNumberPrefix(title: string | null): number {
   if (!title) return Number.MAX_SAFE_INTEGER;
   const match = title.trim().match(/^(\d+)/);
@@ -84,9 +90,9 @@ export async function GET() {
   }
 
   try {
-    // ------------------------------------------------------------------
-    // Course titles from ZILPCOURSESERIES (courseId -> [titles])
-    // ------------------------------------------------------------------
+    // --------------------------------------------------------------
+    // Course titles from ZILPCOURSESERIES
+    // --------------------------------------------------------------
     const titleRows = db
       .prepare(
         `
@@ -114,79 +120,78 @@ export async function GET() {
       return titles.length ? titles[0] : null;
     };
 
-    // ------------------------------------------------------------------
-    // Load exercise assets (images) once
-    // ------------------------------------------------------------------
+    // --------------------------------------------------------------
+    // Load exercise assets once
+    // --------------------------------------------------------------
     const assetRows = db
       .prepare<[], AssetRow>(
         `
         SELECT
           er."Z_EXERCISES" AS exerciseId,
-          r."Z_PK"         AS resId,
+          er."Z_RESOURCES" AS resId,
           r."ZMEDIATYPE"   AS mediaType,
           r."ZDATA"        AS data
         FROM Z_EXERCISE_RESOURCE er
-        JOIN ZILPRESOURCE r
+        LEFT JOIN ZILPRESOURCE r
           ON r."Z_PK" = er."Z_RESOURCES"
         `
       )
       .all();
 
-    const exerciseAssets = new Map<
-      number,
-      { id: number; mediaType: string; dataUrl: string }[]
-    >();
+    // Map resourceId -> Asset
+    const assetById = new Map<number, Asset>();
+    // Map exerciseId -> array of resourceIds
+    const exerciseAssetIds = new Map<number, number[]>();
 
     for (const row of assetRows) {
       if (!row.mediaType || !row.data) continue;
       const mediaType = row.mediaType.toLowerCase();
-      if (!mediaType.startsWith("image/")) continue; // focus on images for now
+      if (!mediaType.startsWith("image/")) continue; // only images for now
 
-      const buf = Buffer.isBuffer(row.data)
-        ? row.data
-        : Buffer.from(row.data as any);
-      const base64 = buf.toString("base64");
-      const dataUrl = `data:${row.mediaType};base64,${base64}`;
+      let asset = assetById.get(row.resId);
+      if (!asset) {
+        const buf = Buffer.isBuffer(row.data)
+          ? row.data
+          : Buffer.from(row.data as any);
+        const base64 = buf.toString("base64");
+        const dataUrl = `data:${row.mediaType};base64,${base64}`;
+        asset = {
+          id: row.resId,
+          mediaType: row.mediaType,
+          dataUrl,
+        };
+        assetById.set(row.resId, asset);
+      }
 
-      const list = exerciseAssets.get(row.exerciseId) ?? [];
-      list.push({
-        id: row.resId,
-        mediaType: row.mediaType,
-        dataUrl,
-      });
-      exerciseAssets.set(row.exerciseId, list);
+      const list = exerciseAssetIds.get(row.exerciseId) ?? [];
+      list.push(row.resId);
+      exerciseAssetIds.set(row.exerciseId, list);
     }
 
-    // ------------------------------------------------------------------
-    // Main query: question + answer + exercise + chapter + book
-    // Using: Question -> Exercise -> Issue -> Course
-    // ------------------------------------------------------------------
+    // --------------------------------------------------------------
+    // Main query: Question -> Exercise -> Issue -> Course
+    // --------------------------------------------------------------
     const rows = db
       .prepare<[], RawRow>(
         `
         SELECT
-          -- Book (course)
           cd."Z_PK"                AS bookId,
           cd."ZCOURSEID"           AS bookCourseId,
           cd."ZREFERENCE"          AS bookRef,
 
-          -- Chapter (issue product)
           chap."Z_PK"              AS chapterId,
           chap."ZTITLE"            AS chapterTitle,
           chap."ZPRODUCTREFERENCE" AS chapterRef,
           issue."ZISSUEID"         AS issueId,
 
-          -- Exercise
           ex."Z_PK"                AS exerciseId,
           ex."ZTITLE"              AS exerciseTitle,
           ex."ZEXERCISEID"         AS exerciseCode,
 
-          -- Question
           q."Z_PK"                 AS questionId,
           q."ZREFERENCE"           AS questionRef,
           qd."ZTEXT_DECRYPTED"     AS questionText,
 
-          -- Answer
           ans."Z_PK"               AS answerId,
           ans."ZNUMBER"            AS answerNumber,
           ans."ZANSWER_TEXT"       AS answerText,
@@ -199,22 +204,18 @@ export async function GET() {
         JOIN ZILPEXERCISE ex
           ON ex."Z_PK" = q."ZEXERCISE"
 
-        -- Exercise -> Issue (chapter)
         JOIN ZILPISSUEDEF issue
           ON issue."Z_PK" = ex."ZISSUE"
 
-        -- Issue -> issue-product -> chapter product
         JOIN ZILPISSUEPRODUCT ip
           ON ip."ZISSUEPRODUCT" = issue."ZISSUEPRODUCT"
 
         JOIN ZILPEPRODUCT chap
           ON chap."Z_PK" = ip."ZEPRODUCT"
 
-        -- Issue -> Course (book)
         JOIN ZILPCOURSEDEF cd
           ON cd."Z_PK" = issue."ZCOURSE"
 
-        -- Answers
         LEFT JOIN ZILPANSWER_DECRYPTED ans
           ON ans."ZQUESTION" = q."Z_PK"
          AND ans."ZTYPE" = 3
@@ -231,9 +232,9 @@ export async function GET() {
 
     db.close();
 
-    // ------------------------------------------------------------------
-    // Fold into: book -> chapter -> question -> answers (+ assets)
-    // ------------------------------------------------------------------
+    // --------------------------------------------------------------
+    // Fold into book -> chapter -> question (+ per-question assets)
+    // --------------------------------------------------------------
     const booksMap = new Map<
       number,
       {
@@ -256,7 +257,8 @@ export async function GET() {
                 text: string;
                 exerciseTitle: string | null;
                 exerciseCode: string | null;
-                assets: { id: number; mediaType: string; dataUrl: string }[];
+                exerciseId: number;
+                assets: Asset[];
                 answers: {
                   id: number;
                   number: number;
@@ -310,8 +312,10 @@ export async function GET() {
       // Question
       let question = chapter.questions.get(row.questionId);
       if (!question) {
-        const assetsForExercise =
-          exerciseAssets.get(row.exerciseId) ?? [];
+        const assetIds = exerciseAssetIds.get(row.exerciseId) ?? [];
+        const assets = assetIds
+          .map((id) => assetById.get(id))
+          .filter((a): a is Asset => !!a);
 
         question = {
           id: row.questionId,
@@ -319,7 +323,8 @@ export async function GET() {
           text: cleanQuestionText(row.questionText),
           exerciseTitle: row.exerciseTitle,
           exerciseCode: row.exerciseCode,
-          assets: assetsForExercise,
+          exerciseId: row.exerciseId,
+          assets,
           answers: [],
         };
         chapter.questions.set(row.questionId, question);
@@ -339,30 +344,106 @@ export async function GET() {
       }
     }
 
-    // Convert maps -> arrays, sort chapters & answers
-    const books = Array.from(booksMap.values()).map((book) => ({
-      id: book.id,
-      title: book.title,
-      ref: book.ref,
-      chapters: Array.from(book.chapters.values())
+    // --------------------------------------------------------------
+    // Convert to arrays, sort, and pull out shared assets per chapter
+    // --------------------------------------------------------------
+    const SHARED_THRESHOLD = 3; // >=3 questions in the same chapter
+
+    const books = Array.from(booksMap.values()).map((book) => {
+      const chapters = Array.from(book.chapters.values())
         .sort(
           (a, b) =>
             extractNumberPrefix(a.title) - extractNumberPrefix(b.title)
         )
-        .map((ch) => ({
-          id: ch.id,
-          title: ch.title,
-          questions: Array.from(ch.questions.values()).map((q) => ({
+        .map((ch) => {
+          // questions array (keep current order)
+          const questions = Array.from(ch.questions.values()).map((q) => ({
             id: q.id,
             ref: q.ref,
             text: q.text,
-            assets: q.assets,
+            exerciseTitle: q.exerciseTitle,
+            exerciseCode: q.exerciseCode,
+            exerciseId: q.exerciseId,
+            assets: [...q.assets],
             answers: [...q.answers].sort(
               (a, b) => a.number - b.number
             ),
-          })),
-        })),
-    }));
+          }));
+
+          // Build asset usage map: assetId -> { asset, questionIndices }
+          const usage = new Map<
+            number,
+            { asset: Asset; questionIndices: number[] }
+          >();
+
+          questions.forEach((q, idx) => {
+            q.assets.forEach((asset) => {
+              const existing = usage.get(asset.id);
+              if (!existing) {
+                usage.set(asset.id, {
+                  asset,
+                  questionIndices: [idx + 1], // 1-based for display
+                });
+              } else {
+                existing.questionIndices.push(idx + 1);
+              }
+            });
+          });
+
+          // Group assets by their set of question indices so that
+          // multi-page “sets” (like the 4 pages in Flugplanung)
+          // show up as a single shared asset group.
+          const groupsMap = new Map<
+            string,
+            { assets: Asset[]; questionNumbers: number[] }
+          >();
+
+          for (const { asset, questionIndices } of usage.values()) {
+            if (questionIndices.length < SHARED_THRESHOLD) continue;
+            const key = questionIndices.join(",");
+            let group = groupsMap.get(key);
+            if (!group) {
+              group = {
+                assets: [],
+                questionNumbers: [...questionIndices],
+              };
+              groupsMap.set(key, group);
+            }
+            group.assets.push(asset);
+          }
+
+          const sharedGroups = Array.from(groupsMap.values());
+
+          // Remove shared assets from per-question lists
+          const sharedIds = new Set<number>();
+          sharedGroups.forEach((g) =>
+            g.assets.forEach((a) => sharedIds.add(a.id))
+          );
+
+          questions.forEach((q) => {
+            q.assets = q.assets.filter((a) => !sharedIds.has(a.id));
+          });
+
+          return {
+            id: ch.id,
+            title: ch.title,
+            // these are the "chapter level" assets used by many questions
+            sharedAssets: sharedGroups.map((g, idx) => ({
+              id: idx,
+              questionNumbers: g.questionNumbers,
+              pages: g.assets,
+            })),
+            questions,
+          };
+        });
+
+      return {
+        id: book.id,
+        title: book.title,
+        ref: book.ref,
+        chapters,
+      };
+    });
 
     return NextResponse.json({ ok: true, books });
   } catch (err: any) {

@@ -32,13 +32,19 @@ type QuizAnswer = {
   id: number;
   number: number;
   text: string;
-  isCorrect: boolean | null; // derived from ZCORRECT_DECRYPTED
+  isCorrect: boolean | null;
 };
 
-type QuizAsset = {
+type QuizAssetPage = {
   id: number;
   mediaType: string;
-  dataUrl: string; // data:image/...;base64,...
+  dataUrl: string;
+};
+
+type QuizSharedAssetGroup = {
+  id: number;
+  questionNumbers: number[];   // 1-based indices in this chapter
+  pages: QuizAssetPage[];      // the “4 pages” etc.
 };
 
 type QuizQuestion = {
@@ -46,26 +52,49 @@ type QuizQuestion = {
   ref: string | null;
   text: string;
   answers: QuizAnswer[];
-  assets?: QuizAsset[]; // <-- NEW
+  assets?: QuizAssetPage[];    // question-specific assets (still under question)
 };
 
 type QuizChapter = {
   id: number;
   title: string;
   questions: QuizQuestion[];
+  sharedAssets?: QuizSharedAssetGroup[]; // NEW
 };
 
 type QuizBook = {
   id: number;
   title: string;
-  ref: string | null;
   chapters: QuizChapter[];
 };
 
-type QuizResponse = {
-  ok: boolean;
-  books: QuizBook[];
-};
+function formatQuestionNumbers(nums: number[]): string {
+  if (!nums.length) return "";
+  const sorted = [...nums].sort((a, b) => a - b);
+  const ranges: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const n = sorted[i];
+    if (n === prev + 1) {
+      prev = n;
+      continue;
+    }
+    if (start === prev) {
+      ranges.push(`${start}`);
+    } else {
+      ranges.push(`${start}–${prev}`);
+    }
+    start = prev = n;
+  }
+  if (start === prev) {
+    ranges.push(`${start}`);
+  } else {
+    ranges.push(`${start}–${prev}`);
+  }
+  return ranges.join(", ");
+}
 
 export default function QuizPage() {
   const [status, setStatus] = useState<string>("Idle");
@@ -349,6 +378,32 @@ export default function QuizPage() {
                         </div>
                       </AccordionTrigger>
                       <AccordionContent className="px-4 pb-4">
+                        {chapter.sharedAssets && chapter.sharedAssets.length > 0 && (
+                          <div className="mb-6 space-y-4">
+                            {chapter.sharedAssets.map((group) => (
+                              <div key={group.id} className="space-y-2">
+                                <div className="space-y-2">
+                                  {group.pages.map((page) =>
+                                    page.mediaType.startsWith("image/") ? (
+                                      <img
+                                        key={page.id}
+                                        src={page.dataUrl}
+                                        alt="Kapitelbild"
+                                        loading="lazy"
+                                        className="w-full max-h-80 rounded-md border object-contain"
+                                      />
+                                    ) : null
+                                  )}
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                  This Material is relevant for Question{" "}
+                                  {formatQuestionNumbers(group.questionNumbers)}.
+                                </p>
+                              </div>
+                            ))}
+                            <div className="border-b mb-4" />
+                          </div>
+                        )}
                         <div className="space-y-4">
                           {chapter.questions.map((q, idx) => (
                             <Card key={q.id}>

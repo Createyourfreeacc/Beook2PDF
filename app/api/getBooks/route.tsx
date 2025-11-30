@@ -140,7 +140,7 @@ export async function GET(request: Request) {
         });
 
         // === 5. Get titles for each course ===
-        //TODO: BUG: Title has potentially the wrong language, presumably if the user downloads the book in a different language first.
+        //TODO: BUG: Title has potentially the wrong language, problem lies with Beook but is not a reliable source of data.
         const sqlTitle = `
             SELECT "ZCOURSEIDENTIFIER", "ZTITLE"
             FROM "ZILPCOURSESERIES"
@@ -168,11 +168,14 @@ export async function GET(request: Request) {
         const transformedImgResultList: any[] = [];
 
         resultList.forEach(rawData => {
-            const bookId = rawData["Z_PK"].toString();
-            const reference = rawData["ZREFERENCE"];
-            const issueNumbers = issueMap[reference] || [];
-            const courseId = rawData["ZCOURSEID"];
-            const title = titleMap[courseId] || [];
+            const bookId = rawData["Z_PK"].toString();          // 1 Note: Beook2Pdf internal ID. Number taken from Z_PK but fundametally arbitrary and does not give any information about datastructure TODO: make it just the counter of the foreach to avoid confusion
+            const reference = rawData["ZREFERENCE"];            // 978-3-905036-95-4
+            const courseId = rawData["ZCOURSEID"];              // PPL020A
+            const courseProductNumber = 0;                      // 40       TODO: ADD BUT FOR WHAT
+            const title = titleMap[courseId] || [];             // Allgemeine Luftfahrzeugkenntnisse
+            const issueNumbers = issueMap[reference] || [];     // [[10, PPL020A00, Vorwort], [11, PPL020A01, 1 Einteilung der Luftfahrzeuge], [12, PPL020A02, 2 Komponenten eines Flugzeuges], [13, PPL020A03, 3 Flugzeugzelle (airfra...
+                                                                // TODO:rename to issues (everywhere (pain)) Should contain ZISSUEIDENTIFIER, ZISSUEPRODUCT and ZTITLE all from ZILPISSUEDEF (does not right now) order it like it is in ZORDER
+
 
             transformedResultList.push({
                 BookID: bookId,

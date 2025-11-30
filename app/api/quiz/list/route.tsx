@@ -12,21 +12,21 @@ const DB_PATH = path.resolve(
 );
 
 type RawRow = {
-  // Canonical book (course) – aligned with /api/getBooks
+  // Canonical book (course)
   bookId: number;              // ZILPCOURSEDEF.Z_PK
-  bookCourseId: string | null; // ZILPCOURSEDEF.ZCOURSEID (e.g. "PPL020H")
+  bookCourseId: string | null; // ZILPCOURSEDEF.ZCOURSEID
   bookRef: string | null;      // ZILPCOURSEDEF.ZREFERENCE
 
-  // Real chapter (issue product)
+  // Chapter (issue product)
   chapterId: number;
   chapterTitle: string | null;
   chapterRef: string | null;
   issueId: string | null;
 
-  // Exercise inside the chapter
+  // Exercise
   exerciseId: number;
   exerciseTitle: string | null;
-  exerciseCode: string | null; // ZEXERCISEID like "010-3.3-02"
+  exerciseCode: string | null;
 
   // Question
   questionId: number;
@@ -36,17 +36,23 @@ type RawRow = {
   // Answer
   answerId: number | null;
   answerNumber: number | null;
-  answerText: string | null;        // from ZANSWER_TEXT
-  answerIsCorrect: number | null;   // from ZCORRECT_DECRYPTED
+  answerText: string | null;
+  answerIsCorrect: number | null; // 0/1 or null
+};
+
+type AssetRow = {
+  exerciseId: number;
+  resId: number;
+  mediaType: string | null;
+  data: Buffer | null;
 };
 
 function cleanQuestionText(text: string | null): string {
   if (!text) return "";
-  // Strip the ${answerBlock} placeholder and basic <br> tags
   return text
-    .replace(/\$\{answerBlock\}/g, "")
+    .replace(/\$\{answerBlock\}/g, "")   // remove placeholder
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/?[^>]+>/g, "") // strip other HTML tags if any
+    .replace(/<\/?[^>]+>/g, "")          // strip other HTML
     .trim();
 }
 
@@ -56,6 +62,13 @@ function cleanAnswerText(text: string | null): string {
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/?[^>]+>/g, "")
     .trim();
+}
+
+// For sorting chapters "1 Foo", "2 Bar", "10 Baz" by the leading number
+function extractNumberPrefix(title: string | null): number {
+  if (!title) return Number.MAX_SAFE_INTEGER;
+  const match = title.trim().match(/^(\d+)/);
+  return match ? parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
 }
 
 export async function GET() {
@@ -71,10 +84,9 @@ export async function GET() {
   }
 
   try {
-    // --------------------------------------------------------------------
-    // Canonical books (courses), same base as /api/getBooks
-    // --------------------------------------------------------------------
-    // Map courseId -> array of localized titles (from ZILPCOURSESERIES)
+    // ------------------------------------------------------------------
+    // Course titles from ZILPCOURSESERIES (courseId -> [titles])
+    // ------------------------------------------------------------------
     const titleRows = db
       .prepare(
         `
@@ -96,79 +108,88 @@ export async function GET() {
       courseIdToTitles.set(courseId, arr);
     }
 
-    // Map canonical bookId (ZILPCOURSEDEF.Z_PK) -> book meta
-    const courseDefRows = db
-      .prepare(
+    const getCourseTitle = (courseId: string | null): string | null => {
+      if (!courseId) return null;
+      const titles = courseIdToTitles.get(courseId) ?? [];
+      return titles.length ? titles[0] : null;
+    };
+
+    // ------------------------------------------------------------------
+    // Load exercise assets (images) once
+    // ------------------------------------------------------------------
+    const assetRows = db
+      .prepare<[], AssetRow>(
         `
         SELECT
-          "Z_PK"          AS bookId,
-          "ZCOURSEID"     AS courseId,
-          "ZREFERENCE"    AS courseRef
-        FROM "ZILPCOURSEDEF"
-        WHERE "Z_PK" IS NOT NULL
+          er."Z_EXERCISES" AS exerciseId,
+          r."Z_PK"         AS resId,
+          r."ZMEDIATYPE"   AS mediaType,
+          r."ZDATA"        AS data
+        FROM Z_EXERCISE_RESOURCE er
+        JOIN ZILPRESOURCE r
+          ON r."Z_PK" = er."Z_RESOURCES"
         `
       )
-      .all() as any[];
+      .all();
 
-    const canonicalBooks = new Map<
+    const exerciseAssets = new Map<
       number,
-      { id: number; title: string; courseId: string | null; ref: string | null }
+      { id: number; mediaType: string; dataUrl: string }[]
     >();
 
-    for (const row of courseDefRows) {
-      const id = Number(row.bookId);
-      const courseId: string | null =
-        row.courseId != null ? String(row.courseId) : null;
-      const ref: string | null =
-        row.bookRef != null ? String(row.bookRef) : null;
+    for (const row of assetRows) {
+      if (!row.mediaType || !row.data) continue;
+      const mediaType = row.mediaType.toLowerCase();
+      if (!mediaType.startsWith("image/")) continue; // focus on images for now
 
-      const titles = courseId ? courseIdToTitles.get(courseId) : undefined;
-      const title =
-        titles?.[0] ??
-        courseId ??
-        ref ??
-        `Book ${id}`;
+      const buf = Buffer.isBuffer(row.data)
+        ? row.data
+        : Buffer.from(row.data as any);
+      const base64 = buf.toString("base64");
+      const dataUrl = `data:${row.mediaType};base64,${base64}`;
 
-      canonicalBooks.set(id, {
-        id,
-        title,
-        courseId,
-        ref,
+      const list = exerciseAssets.get(row.exerciseId) ?? [];
+      list.push({
+        id: row.resId,
+        mediaType: row.mediaType,
+        dataUrl,
       });
+      exerciseAssets.set(row.exerciseId, list);
     }
 
-    // Pull **decrypted** questions & answers and map them to book/exercise
-    // NOTE: assumes /api/quiz/decrypt has already created and populated:
-    //   ZILPQUESTION_DECRYPTED, ZILPANSWER_DECRYPTED
+    // ------------------------------------------------------------------
+    // Main query: question + answer + exercise + chapter + book
+    // Using: Question -> Exercise -> Issue -> Course
+    // ------------------------------------------------------------------
     const rows = db
       .prepare<[], RawRow>(
         `
         SELECT
-          -- Canonical book (course)
-          cd."Z_PK"               AS bookId,
-          cd."ZCOURSEID"          AS bookCourseId,
-          cd."ZREFERENCE"         AS bookRef,
+          -- Book (course)
+          cd."Z_PK"                AS bookId,
+          cd."ZCOURSEID"           AS bookCourseId,
+          cd."ZREFERENCE"          AS bookRef,
 
-          -- Real chapter (issue product)
-          chap."Z_PK"             AS chapterId,
-          chap."ZTITLE"           AS chapterTitle,
+          -- Chapter (issue product)
+          chap."Z_PK"              AS chapterId,
+          chap."ZTITLE"            AS chapterTitle,
           chap."ZPRODUCTREFERENCE" AS chapterRef,
-          issue."ZISSUEID"        AS issueId,
+          issue."ZISSUEID"         AS issueId,
 
           -- Exercise
-          ex."Z_PK"               AS exerciseId,
-          ex."ZTITLE"             AS exerciseTitle,
-          ex."ZEXERCISEID"        AS exerciseCode,
+          ex."Z_PK"                AS exerciseId,
+          ex."ZTITLE"              AS exerciseTitle,
+          ex."ZEXERCISEID"         AS exerciseCode,
 
           -- Question
-          q."Z_PK"                AS questionId,
-          q."ZREFERENCE"          AS questionRef,
-          qd."ZTEXT_DECRYPTED"    AS questionText,
+          q."Z_PK"                 AS questionId,
+          q."ZREFERENCE"           AS questionRef,
+          qd."ZTEXT_DECRYPTED"     AS questionText,
 
           -- Answer
-          ans."Z_PK"              AS answerId,
-          ans."ZNUMBER"           AS answerNumber,
-          ans."ZANSWER_TEXT"      AS answerText,
+          ans."Z_PK"               AS answerId,
+          ans."ZNUMBER"            AS answerNumber,
+          ans."ZANSWER_TEXT"       AS answerText,
           ans."ZCORRECT_DECRYPTED" AS answerIsCorrect
 
         FROM ZILPQUESTION_DECRYPTED qd
@@ -178,30 +199,25 @@ export async function GET() {
         JOIN ZILPEXERCISE ex
           ON ex."Z_PK" = q."ZEXERCISE"
 
-        -- Link exercise -> issue (chapter)
+        -- Exercise -> Issue (chapter)
         JOIN ZILPISSUEDEF issue
           ON issue."Z_PK" = ex."ZISSUE"
 
-        -- Map issue -> issue-product -> chapter product
+        -- Issue -> issue-product -> chapter product
         JOIN ZILPISSUEPRODUCT ip
           ON ip."ZISSUEPRODUCT" = issue."ZISSUEPRODUCT"
 
         JOIN ZILPEPRODUCT chap
           ON chap."Z_PK" = ip."ZEPRODUCT"
 
-        -- Map exercise -> course product -> course def (canonical book)
-        JOIN ZILPTOPICDEFINITION td
-          ON td."Z_PK" = ex."ZTOPICDEFINITION"
-
-        JOIN ZILPCOURSEPRODUCT cp
-          ON td."ZRELATIVEFILEPATH" LIKE '%' || '/courses/' || cp."ZCOURSEIDENTIFIER" || '/' || '%'
-
+        -- Issue -> Course (book)
         JOIN ZILPCOURSEDEF cd
-          ON cd."ZREFERENCE" = cp."ZCOURSEREFERENCE"
+          ON cd."Z_PK" = issue."ZCOURSE"
 
+        -- Answers
         LEFT JOIN ZILPANSWER_DECRYPTED ans
           ON ans."ZQUESTION" = q."Z_PK"
-         AND ans."ZTYPE" = 3  -- only real answer options
+         AND ans."ZTYPE" = 3
 
         ORDER BY
           cd."ZCOURSEID",
@@ -213,27 +229,34 @@ export async function GET() {
       )
       .all();
 
-
     db.close();
 
-    // Now build nested structure: book -> chapter(exercise) -> question -> answers
+    // ------------------------------------------------------------------
+    // Fold into: book -> chapter -> question -> answers (+ assets)
+    // ------------------------------------------------------------------
     const booksMap = new Map<
       number,
       {
         id: number;
-        title: string;
+        courseId: string | null;
         ref: string | null;
+        title: string;
         chapters: Map<
           number,
           {
             id: number;
             title: string;
+            ref: string | null;
+            issueId: string | null;
             questions: Map<
               number,
               {
                 id: number;
                 ref: string | null;
                 text: string;
+                exerciseTitle: string | null;
+                exerciseCode: string | null;
+                assets: { id: number; mediaType: string; dataUrl: string }[];
                 answers: {
                   id: number;
                   number: number;
@@ -248,36 +271,37 @@ export async function GET() {
     >();
 
     for (const row of rows) {
-      // Book (canonical course def)
+      // Book
       let book = booksMap.get(row.bookId);
       if (!book) {
-        const canonical = canonicalBooks.get(row.bookId);
+        const computedTitle =
+          getCourseTitle(row.bookCourseId) ??
+          row.bookCourseId ??
+          row.bookRef ??
+          `Buch ${row.bookId}`;
 
         book = {
           id: row.bookId,
-          title:
-            canonical?.title ??
-            row.bookCourseId ??
-            "Unknown Book",
-          ref:
-            canonical?.ref ??
-            row.bookRef ??
-            row.bookCourseId,
+          courseId: row.bookCourseId,
+          ref: row.bookRef,
+          title: computedTitle,
           chapters: new Map(),
         };
         booksMap.set(row.bookId, book);
       }
 
-      // Chapter = actual book chapter (issue product)
+      // Chapter
       let chapter = book.chapters.get(row.chapterId);
       if (!chapter) {
         chapter = {
           id: row.chapterId,
-          // Prefer the real chapter title, fall back to issueId or generic
           title:
             row.chapterTitle ??
             row.issueId ??
-            "Unknown Chapter",
+            row.chapterRef ??
+            `Kapitel ${row.chapterId}`,
+          ref: row.chapterRef,
+          issueId: row.issueId,
           questions: new Map(),
         };
         book.chapters.set(row.chapterId, chapter);
@@ -286,16 +310,22 @@ export async function GET() {
       // Question
       let question = chapter.questions.get(row.questionId);
       if (!question) {
+        const assetsForExercise =
+          exerciseAssets.get(row.exerciseId) ?? [];
+
         question = {
           id: row.questionId,
           ref: row.questionRef,
           text: cleanQuestionText(row.questionText),
+          exerciseTitle: row.exerciseTitle,
+          exerciseCode: row.exerciseCode,
+          assets: assetsForExercise,
           answers: [],
         };
         chapter.questions.set(row.questionId, question);
       }
 
-      // Answer (may be null if no answers in row)
+      // Answer
       if (row.answerId != null && row.answerNumber != null) {
         question.answers.push({
           id: row.answerId,
@@ -309,39 +339,36 @@ export async function GET() {
       }
     }
 
-    // Ensure all canonical books exist, even if they have no exercises
-    for (const canonical of canonicalBooks.values()) {
-      if (!booksMap.has(canonical.id)) {
-        booksMap.set(canonical.id, {
-          id: canonical.id,
-          title: canonical.title,
-          ref: canonical.ref,
-          chapters: new Map(),
-        });
-      }
-    }
-
-    // Convert nested Maps → plain arrays for JSON
-    const books = Array.from(booksMap.values()).map((b) => ({
-      id: b.id,
-      title: b.title,
-      ref: b.ref,
-      chapters: Array.from(b.chapters.values()).map((ch) => ({
-        id: ch.id,
-        title: ch.title,
-        questions: Array.from(ch.questions.values()).map((q) => ({
-          ...q,
-          // sort answers by number
-          answers: [...q.answers].sort((a, b) => a.number - b.number),
+    // Convert maps -> arrays, sort chapters & answers
+    const books = Array.from(booksMap.values()).map((book) => ({
+      id: book.id,
+      title: book.title,
+      ref: book.ref,
+      chapters: Array.from(book.chapters.values())
+        .sort(
+          (a, b) =>
+            extractNumberPrefix(a.title) - extractNumberPrefix(b.title)
+        )
+        .map((ch) => ({
+          id: ch.id,
+          title: ch.title,
+          questions: Array.from(ch.questions.values()).map((q) => ({
+            id: q.id,
+            ref: q.ref,
+            text: q.text,
+            assets: q.assets,
+            answers: [...q.answers].sort(
+              (a, b) => a.number - b.number
+            ),
+          })),
         })),
-      })),
     }));
 
     return NextResponse.json({ ok: true, books });
   } catch (err: any) {
     try {
       db.close();
-    } catch { }
+    } catch {}
     return NextResponse.json(
       { error: "Failed to read quiz data", details: String(err) },
       { status: 500 }

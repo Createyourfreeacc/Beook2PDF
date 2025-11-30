@@ -35,11 +35,18 @@ type QuizAnswer = {
   isCorrect: boolean | null; // derived from ZCORRECT_DECRYPTED
 };
 
+type QuizAsset = {
+  id: number;
+  mediaType: string;
+  dataUrl: string; // data:image/...;base64,...
+};
+
 type QuizQuestion = {
   id: number;
   ref: string | null;
   text: string;
   answers: QuizAnswer[];
+  assets?: QuizAsset[]; // <-- NEW
 };
 
 type QuizChapter = {
@@ -357,6 +364,22 @@ export default function QuizPage() {
                                 )}
                               </CardHeader>
                               <CardContent className="space-y-2">
+                                {q.assets && q.assets.length > 0 && (
+                                  <div className="space-y-2 mb-2">
+                                    {q.assets.map((asset) =>
+                                      asset.mediaType.startsWith("image/") ? (
+                                        <img
+                                          key={asset.id}
+                                          src={asset.dataUrl}
+                                          alt="Fragebild"
+                                          loading="lazy"
+                                          className="max-h-64 w-full rounded-md border object-contain"
+                                        />
+                                      ) : null
+                                    )}
+                                  </div>
+                                )}
+
                                 {q.answers.length === 0 && (
                                   <p className="text-xs text-muted-foreground">
                                     No answer choices found.

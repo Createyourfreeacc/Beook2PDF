@@ -66,7 +66,7 @@ The Beook application uses multiple layers of encryption:
 
 This tool has been tested with the following learning materials:
 
-| ISBN |
+| Reference |
 |------|
 | 978-3-905036-87-9 |
 | 978-3-03901-007-3 |
@@ -83,7 +83,7 @@ This tool has been tested with the following learning materials:
 
 ## Known Limitations
 
-- Only tested with BAK Aviation learning materials
+- Only tested with few learning materials
 - Quiz content is decrypted but not yet included in PDF output
 - PDF generation uses Puppeteer (may have performance implications for large books)
 

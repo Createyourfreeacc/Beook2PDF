@@ -49,6 +49,12 @@ type BookApiItem = {
   Issue: number[];
 };
 
+type ChaptersByBookRef = {
+  [bookRef: string]: {
+    [chapterRef: string]: string;
+  };
+};
+
 function getBookLabel(book: BookApiItem): string {
   if (Array.isArray(book.Titel)) {
     if (book.Titel.length > 0 && book.Titel[0]) return book.Titel[0] as string;
@@ -72,8 +78,12 @@ export default function QuestionsPanel() {
   const [bookFilter, setBookFilter] = React.useState<string>("all"); // "all" | "none" | ref
   const [chapterFilter, setChapterFilter] = React.useState<string>("all"); // "all" | "none" | ref
 
-  // new: book metadata for nicer labels
+  // book metadata for nicer labels
   const [books, setBooks] = React.useState<BookApiItem[]>([]);
+
+  // chapter titles per book_ref / chapter_ref, used for nicer labels
+  const [chaptersByBookRef, setChaptersByBookRef] =
+    React.useState<ChaptersByBookRef>({});
 
   React.useEffect(() => {
     const loadBooks = async () => {
@@ -88,6 +98,47 @@ export default function QuestionsPanel() {
     };
     loadBooks();
   }, []);
+
+  React.useEffect(() => {
+    const loadChaptersForBooks = async () => {
+      if (!books || books.length === 0) return;
+
+      const updates: ChaptersByBookRef = {};
+
+      for (const b of books) {
+        const ref = b.Refrence;
+        if (!ref) continue;
+        if (chaptersByBookRef[ref]) continue; // already loaded
+
+        try {
+          const params = new URLSearchParams({ bookRef: ref });
+          const res = await fetch(`/api/getChapters?${params.toString()}`);
+          if (!res.ok) continue;
+          const data = await res.json();
+          const list = (data?.chapters ?? []) as { ref: string; title: string }[];
+
+          const byChapter: { [chapterRef: string]: string } = {};
+          for (const c of list) {
+            if (c.ref) {
+              byChapter[c.ref] = c.title || c.ref;
+            }
+          }
+
+          if (Object.keys(byChapter).length > 0) {
+            updates[ref] = byChapter;
+          }
+        } catch {
+          // non-critical: we just fall back to raw chapter_ref later
+        }
+      }
+
+      if (Object.keys(updates).length > 0) {
+        setChaptersByBookRef((prev) => ({ ...prev, ...updates }));
+      }
+    };
+
+    loadChaptersForBooks();
+  }, [books, chaptersByBookRef]);
 
   const bookByRef = React.useMemo(() => {
     const map = new Map<string, BookApiItem>();
@@ -104,6 +155,31 @@ export default function QuestionsPanel() {
     const b = bookByRef.get(ref);
     if (b) return getBookLabel(b);
     return ref; // fallback to raw reference string
+  };
+
+  const chapterLabelForRef = (
+    chapterRef: string | null | undefined,
+    bookRefHint?: string | null
+  ): string => {
+    if (!chapterRef) return "None";
+
+    // Prefer lookup with the provided bookRef
+    if (bookRefHint && chaptersByBookRef[bookRefHint]) {
+      const byChapter = chaptersByBookRef[bookRefHint];
+      if (byChapter && byChapter[chapterRef]) {
+        return byChapter[chapterRef];
+      }
+    }
+
+    // Fallback: search all known books for this chapterRef
+    for (const [bookRef, byChapter] of Object.entries(chaptersByBookRef)) {
+      if (byChapter && byChapter[chapterRef]) {
+        return byChapter[chapterRef];
+      }
+    }
+
+    // Last resort: show the raw DB value
+    return chapterRef;
   };
 
   const load = React.useCallback(async () => {
@@ -291,7 +367,10 @@ export default function QuestionsPanel() {
                 <SelectItem value="none">Chapter: None</SelectItem>
                 {availableChapterRefs.map((ref) => (
                   <SelectItem key={ref} value={ref}>
-                    Chapter {ref}
+                    {chapterLabelForRef(
+                      ref,
+                      bookFilter === "all" || bookFilter === "none" ? undefined : bookFilter
+                    )}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -350,7 +429,10 @@ export default function QuestionsPanel() {
                             <span>
                               · Chapter:{" "}
                               <span className="font-medium">
-                                {row.chapter_ref ?? "None"}
+                                {chapterLabelForRef(
+                                  row.chapter_ref ?? null,
+                                  row.book_ref ?? null
+                                )}
                               </span>
                             </span>
                           </div>

@@ -366,7 +366,7 @@ export default function AddQuizQuestionForm() {
                         key={c.ref || String(c.chapterId)}
                         value={c.ref}
                       >
-                        {c.issueId ? `${c.issueId} – ${c.title}` : c.title}
+                        {c.title}
                       </SelectItem>
                     ))}
                   </SelectContent>

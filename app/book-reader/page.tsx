@@ -227,21 +227,31 @@ export default function BookReader() {
                             const tocElements = [];
                             let i = 0;
 
-                            //TODO: BUG: page-number stays on line one if text is too long and wraps around to second line
                             const createEntryElement = (e) => (
                                 <div
                                     key={`${e.zpk}`}
                                     style={{
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
+                                        position: 'relative',
                                         fontWeight: e.zLevel === 1 ? 'bold' : 'normal',
                                         marginLeft: `${(e.zLevel - 1) * 20}px`,
+                                        paddingRight: '3rem', // space reserved for the page number
                                     }}
                                 >
-                                    <a href={`#${e.chapterSection?.replace(/\s+/g, '-').toLowerCase()}`}>
+                                    <a
+                                        href={`#${e.chapterSection?.replace(/\s+/g, '-').toLowerCase()}`}
+                                        style={{ display: 'inline' }}
+                                    >
                                         {e.chapterSection} {e.title}
                                     </a>
-                                    <span>{e.pagenum}</span>
+                                    <span
+                                        style={{
+                                            position: 'absolute',
+                                            right: 0,
+                                            bottom: 0,
+                                        }}
+                                    >
+                                        {e.pagenum}
+                                    </span>
                                 </div>
                             );
 
@@ -436,7 +446,7 @@ export default function BookReader() {
                         className="transition duration-700 ease-in-out ..." /><span className="text-sm">{progressClient}%</span></>
                     }
                 </div>
-                <Button 
+                <Button
                     variant="outline"
                     onClick={() => generatePDF()}
                     type="button"

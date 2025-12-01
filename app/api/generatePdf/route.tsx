@@ -271,7 +271,7 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
   const pdfBuffers: Buffer[] = new Array(pageCount);
   const maxConcurrentProcesses = 20;
   let pagesProcessed = 0;
-  
+
   const processPageBatch = async (startIndex: number) => {
     const page = await browser.newPage();
     await page.setViewport({ width: 2434, height: 3445 });
@@ -602,20 +602,25 @@ async function generateTOCHtml(books: Book[], entries: TOCData[]): Promise<{ id:
         const tocElements = [];
         let i = 0;
 
-        //TODO: BUG: page-number stays on line one if text is too long and wraps around to second line
         const createEntryElement = (e) => (
           `<div
-                      key="${e.zpk}"
-                      style="display: flex;
-                            justify-content: space-between;
-                            font-weight: ${e.zLevel === 1 ? 'bold' : 'normal'};
-                            margin-left: ${(e.zLevel - 1) * 20}px;"
-                    >
-                    <span>
-                      ${e.chapterSection} ${e.title}
-                    <span>
-                    <span>${e.pagenum}</span>
-                  </div>`
+              key="${e.zpk}"
+              style="position: relative;
+                     font-weight: ${e.zLevel === 1 ? 'bold' : 'normal'};
+                     margin-left: ${(e.zLevel - 1) * 20}px;
+                     padding-right: 3rem;"
+          >
+            <span style="display: inline;">
+              ${e.chapterSection} ${e.title}
+            </span>
+            <span
+              style="position: absolute;
+                     right: 0;
+                     bottom: 0;"
+            >
+              ${e.pagenum}
+            </span>
+          </div>`
         );
 
         while (i < matchingEntries.length) {

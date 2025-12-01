@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import {
   DndContext,
   closestCenter,
@@ -18,9 +19,10 @@ import {
   restrictToParentElement,
 } from "@dnd-kit/modifiers"
 import { CSS } from "@dnd-kit/utilities"
-import { motion } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { Toggle } from "@/components/ui/toggle"
+import { ChevronUp, ChevronDown } from "lucide-react"
 
 type Item = {
   id: string
@@ -40,9 +42,12 @@ type SortableItemProps = {
   content: string | JSX.Element
   toggled: boolean
   onToggle: (id: string) => void
+  isFirst: boolean
+  isLast: boolean
 }
 
-function SortableItem({ id, content, toggled, onToggle }: SortableItemProps) {
+function SortableItem({ id, content, toggled, onToggle, isFirst, isLast }: SortableItemProps) {
+  const [isHovered, setIsHovered] = useState(false)
   const {
     attributes,
     listeners,
@@ -57,16 +62,44 @@ function SortableItem({ id, content, toggled, onToggle }: SortableItemProps) {
     transition,
   }
 
+  const showTopArrow = isHovered && !isFirst
+  const showBottomArrow = isHovered && !isLast
+
   return (
     <motion.div
       ref={setNodeRef}
       style={style}
-      className={cn(isDragging && "opacity-0")}
+      className={cn("relative", isDragging && "opacity-0")}
       layout={!isDragging}
       layoutId={!isDragging ? id : undefined}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      animate={{
+        marginTop: showTopArrow ? 8 : 0,
+        marginBottom: showBottomArrow ? 8 : 0,
+      }}
+      transition={{ type: "spring", stiffness: 400, damping: 25 }}
       {...attributes}
       {...listeners}
     >
+      {/* Top arrow indicator */}
+      <AnimatePresence>
+        {showTopArrow && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, y: [0, -3, 0] }}
+            exit={{ opacity: 0 }}
+            transition={{ 
+              opacity: { duration: 0.15 },
+              y: { duration: 0.6, repeat: Infinity, ease: "easeInOut" }
+            }}
+            className="absolute -top-2.5 left-1/2 -translate-x-1/2 z-10 pointer-events-none"
+          >
+            <ChevronUp className="w-4 h-4 text-muted-foreground" strokeWidth={3} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <Toggle
         pressed={toggled}
         onPressedChange={() => onToggle(id)}
@@ -79,6 +112,24 @@ function SortableItem({ id, content, toggled, onToggle }: SortableItemProps) {
       >
         {content}
       </Toggle>
+
+      {/* Bottom arrow indicator */}
+      <AnimatePresence>
+        {showBottomArrow && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, y: [0, 3, 0] }}
+            exit={{ opacity: 0 }}
+            transition={{ 
+              opacity: { duration: 0.15 },
+              y: { duration: 0.6, repeat: Infinity, ease: "easeInOut" }
+            }}
+            className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 z-10 pointer-events-none"
+          >
+            <ChevronDown className="w-4 h-4 text-muted-foreground" strokeWidth={3} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }
@@ -120,13 +171,15 @@ export default function OrderBar({ items: initialItems, onReorder, onToggle, hig
       >
         <SortableContext items={initialItems.map(i => i.id)} strategy={verticalListSortingStrategy}>
           <div className="flex flex-col gap-2">
-            {initialItems.map((item) => (
+            {initialItems.map((item, index) => (
               <SortableItem
                 key={item.id}
                 id={item.id}
                 content={item.content}
                 toggled={!!item.toggled}
                 onToggle={handleToggle}
+                isFirst={index === 0}
+                isLast={index === initialItems.length - 1}
               />
             ))}
           </div>

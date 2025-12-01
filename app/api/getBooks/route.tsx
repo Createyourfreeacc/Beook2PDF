@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
 import path from 'path';
-import os from 'os';
 import fs from 'fs';
+import { getResolvedPaths } from '@/lib/config';
 
-const username = os.userInfo().username;
-const DB_PATH = path.resolve(`C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/1/data/beook_book_v6.sqlite`);
-const IMG_PATH = "C:/Users/pilot/AppData/Roaming/ionesoft/beook/release/assetStage/prod/fileSynch"
+const { dbPath: DB_PATH, imgPath: IMG_PATH } = getResolvedPaths();
 
 function findFolderContainingFile(rootDir: string, filename: string): string | null {
     const subdirs = fs.readdirSync(rootDir);

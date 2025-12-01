@@ -46,20 +46,13 @@
 import { NextResponse } from "next/server";
 import CryptoJS from "crypto-js";
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// ==========================================================================
-// HARD-CODED SQLITE DB LOCATION
-// Automatically resolves to current Windows user profile
-// ==========================================================================
-const username = os.userInfo().username;
-const DB_PATH = path.resolve(
-  `C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/1/data/beook_book_v6.sqlite`
-);
+
+import { getResolvedPaths } from '@/lib/config';
+const { dbPath: DB_PATH } = getResolvedPaths();
 
 // ==========================================================================
 // CRYPTO CONSTANTS — FROM ILPBookSettingsHelper (decompiled)

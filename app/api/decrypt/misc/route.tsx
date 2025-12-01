@@ -18,17 +18,13 @@
 import { NextResponse } from "next/server";
 import CryptoJS from "crypto-js";
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Same DB path convention as /app/api/route.ts
-const username = os.userInfo().username;
-const DB_PATH = path.resolve(
-  `C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/1/data/beook_book_v6.sqlite`
-);
+// DB path loaded from centralized config
+import { getResolvedPaths } from '@/lib/config';
+const { dbPath: DB_PATH } = getResolvedPaths();
 
 // From ILPBookSettingsHelper (same as quiz decrypt)
 const KEY_STRING = "fdäK?s^dw-+ç,W!El";

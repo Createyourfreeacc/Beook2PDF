@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import sqlite from "better-sqlite3";
-import path from "path";
-import os from "os";
+import { getResolvedPaths } from '@/lib/config';
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const username = os.userInfo().username;
-const DB_PATH = path.resolve(
-  `C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/1/data/beook_book_v6.sqlite`
-);
+const { dbPath: DB_PATH } = getResolvedPaths();
 
 /**
  * GET /api/getChapters?bookRef=978-3-905036-95-4

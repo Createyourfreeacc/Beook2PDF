@@ -1,13 +1,9 @@
 import { NextResponse } from "next/server";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
-import path from "path";
-import os from "os";
+import { getResolvedPaths } from '@/lib/config';
 
-const username = os.userInfo().username;
-const DB_PATH = path.resolve(
-  `C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/1/data/beook_book_v6.sqlite`
-);
+const { dbPath: DB_PATH } = getResolvedPaths();
 
 async function getDb() {
   const db = await open({

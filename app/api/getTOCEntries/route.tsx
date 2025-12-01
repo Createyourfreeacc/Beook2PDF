@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
-import path from 'path';
-import os from 'os';
+import { getResolvedPaths } from '@/lib/config';
 
-const username = os.userInfo().username;
-const DB_PATH = path.resolve(`C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/1/data/beook_book_v6.sqlite`);
+const { dbPath: DB_PATH } = getResolvedPaths();
 
 export async function GET(request: NextRequest) {
     const searchParams = new URL(request.url).searchParams;

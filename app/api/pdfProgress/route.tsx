@@ -6,17 +6,29 @@ export async function GET(request: NextRequest) {
   const jobId = searchParams.get('jobId');
   if (!jobId) return new Response("Missing jobId", { status: 400 });
 
+  let intervalId: NodeJS.Timeout;
+
   const stream = new ReadableStream({
-    async start(controller) {
+    start(controller) {
       const encoder = new TextEncoder();
 
-      const interval = setInterval(() => {
+      intervalId = setInterval(() => {
         const current = getProgress(jobId);
-        controller.enqueue(encoder.encode(`data: ${current}\n\n`));
-        if (current >= 100) {
-          clearInterval(interval);
+        try {
+          controller.enqueue(encoder.encode(`data: ${current}\n\n`));
+          if (current >= 100) {
+            clearInterval(intervalId);
+            controller.close();
+          }
+        } catch {
+          // Controller is closed (client disconnected), stop polling
+          clearInterval(intervalId);
         }
       }, 800);
+    },
+    cancel() {
+      // Called when client disconnects
+      clearInterval(intervalId);
     }
   });
 

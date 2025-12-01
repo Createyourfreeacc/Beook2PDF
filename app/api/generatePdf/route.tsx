@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
 import puppeteer from 'puppeteer';
 import { PDFDocument, PDFName, PDFString, PDFArray, PDFNull, PDFDict, PDFRef, PDFNumber } from 'pdf-lib';
-import { setProgress } from '@/lib/progressStore';
+import { setProgress, setPhaseProgress } from '@/lib/progressStore';
 import { getResolvedPaths } from '@/lib/config';
 
 const { dbPath: DB_PATH } = getResolvedPaths();
@@ -65,10 +65,10 @@ export async function GET(request: NextRequest) {
       ? `AND "ZISSUE" IN (${allowedIssues})`
       : '';
 
-    setProgress(jobId, 1);
+    setPhaseProgress(jobId, 'init', 0.5);
     await new Promise(res => setImmediate(res))
     const maxZPk = await getMaxZPk();
-    setProgress(jobId, 2);
+    setPhaseProgress(jobId, 'init', 1);
     await new Promise(res => setImmediate(res))
 
     // Fetch all data using pagination
@@ -81,21 +81,20 @@ export async function GET(request: NextRequest) {
       // Check if there's more data
       hasMore = result.pagination.hasMore;
       offset += limit;
-      const fetchPercent = Math.min(Math.floor((offset / maxZPk) * 17) + 3, 20);
-      setProgress(jobId, fetchPercent);
+      setPhaseProgress(jobId, 'fetch', Math.min(offset / maxZPk, 1));
       await new Promise(res => setImmediate(res))
     }
 
-    setProgress(jobId, 21);
+    setPhaseProgress(jobId, 'process', 0);
     await new Promise(res => setImmediate(res))
     const dataMap: Record<string, { Z_PK: number; ZDATA: any; ZTOPIC: number; ZMEDIATYPE: string; ZISSUE: string }> = allData;
     const htmlPages = await modifyContent(books, dataMap, jobId);
 
-    setProgress(jobId, 45);
+    setPhaseProgress(jobId, 'convert', 0);
     await new Promise(res => setImmediate(res))
     const mergedPdfBytes = await generateMergedPdf(books, htmlPages, jobId);
 
-    setProgress(jobId, 97);
+    setPhaseProgress(jobId, 'finalize', 1);
     await new Promise(res => setImmediate(res))
     return new Response(mergedPdfBytes, {
       status: 200,
@@ -249,8 +248,7 @@ export async function modifyContent(books: Book[], dataMap: Record<string, { Z_P
 
       htmlPages.push(htmlWithCss);
 
-      const pagePercent = Math.min(Math.floor((ztopic / maxZtopic) * 22) + 22, 44);
-      setProgress(jobId, pagePercent);
+      setPhaseProgress(jobId, 'process', Math.min(ztopic / maxZtopic, 1));
       await new Promise(res => setImmediate(res))
     }
   };
@@ -272,15 +270,16 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
 
   const pdfBuffers: Buffer[] = new Array(pageCount);
   const maxConcurrentProcesses = 20;
-  //TODO ADD PROGRESS UPDATES CORRECTLY
-  //const processPercent = Math.min(Math.floor((current / max) * 48) + 46, 94);
-  //setProgress(jobId, processPercent);
+  let pagesProcessed = 0;
+  
   const processPageBatch = async (startIndex: number) => {
     const page = await browser.newPage();
     await page.setViewport({ width: 2434, height: 3445 });
 
     for (let i = startIndex; i < Math.min(startIndex + maxConcurrentProcesses, pageCount); i++) {
       pdfBuffers[i] = await processPage(page, htmlPages[i], i);
+      pagesProcessed++;
+      setPhaseProgress(jobId, 'convert', Math.min(pagesProcessed / pageCount, 0.95));
     }
 
     await page.close();
@@ -295,11 +294,11 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
   await Promise.all(promises);
   await browser.close();
 
-  setProgress(jobId, 94);
+  setPhaseProgress(jobId, 'convert', 1);
   const mergedPdfDoc = await PDFDocument.create();
   const pdfDocuments = await Promise.all(pdfBuffers.map(buffer => PDFDocument.load(buffer)));
 
-  setProgress(jobId, 95);
+  setPhaseProgress(jobId, 'merge', 0.3);
   for (const pdf of pdfDocuments) {
     const copiedPages = await mergedPdfDoc.copyPages(pdf, pdf.getPageIndices());
     copiedPages.forEach(page => {
@@ -370,7 +369,7 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
 
   const PdfDoc = await mergeWithOutlines(mergedPdfDoc, tocOutline);
 
-  setProgress(jobId, 96);
+  setPhaseProgress(jobId, 'merge', 1);
   return await PdfDoc.save();
 }
 

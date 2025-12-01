@@ -72,6 +72,7 @@ export default function BookReader() {
     const [currentProfile, setCurrentProfile] = useState<string>('');
     const [books, setBooks] = useState<Book[]>([]);
     const [orderBarItems, setOrderBarItems] = useState<{ id: string; content: JSX.Element }[]>([]); // TODO: maybe remove, books already beeing reordered, only here for img
+    const [downloadError, setDownloadError] = useState(false);
     const allBooksToggled = orderBarItems.length > 0 && orderBarItems.every(item => books.find(b => b.BookID === item.id)?.Toggled);
     const someBooksToggled = orderBarItems.some(item => books.find(b => b.BookID === item.id)?.Toggled);
 
@@ -384,6 +385,15 @@ export default function BookReader() {
 
     // generate a PDF serverside
     const generatePDF = async () => {
+        // Check if any books are selected
+        const selectedBooks = books.filter(book => book.Toggled);
+        if (selectedBooks.length === 0) {
+            // Flash button red to indicate error
+            setDownloadError(true);
+            setTimeout(() => setDownloadError(false), 1000);
+            return;
+        }
+
         try {
             setMuteEvent(false);
             setProgressClient(0);
@@ -426,10 +436,11 @@ export default function BookReader() {
                         className="transition duration-700 ease-in-out ..." /><span className="text-sm">{progressClient}%</span></>
                     }
                 </div>
-                {/*TODO: Flash button red and do nothing if no book is selected*/}
-                <Button variant="outline"
+                <Button 
+                    variant="outline"
                     onClick={() => generatePDF()}
                     type="button"
+                    className={`transition-all duration-300 ${downloadError ? 'border-red-500 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : ''}`}
                 >
                     <ArrowBigDownDash></ArrowBigDownDash>Download
                 </Button>
@@ -485,6 +496,7 @@ export default function BookReader() {
                                     setBooks([...reorderedBooks, ...booksNotInOrderBar]);
                                     setOrderBarItems(newOrder);
                                 }}
+                                highlightError={downloadError}
                             />
                         </TooltipTrigger>
                         <TooltipContent>

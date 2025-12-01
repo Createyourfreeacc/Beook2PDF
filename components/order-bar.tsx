@@ -32,6 +32,7 @@ type OrderBarProps = {
   items: Item[]
   onReorder?: (newOrder: Item[]) => void
   onToggle?: (id: string) => void
+  highlightError?: boolean
 }
 
 type SortableItemProps = {
@@ -82,7 +83,7 @@ function SortableItem({ id, content, toggled, onToggle }: SortableItemProps) {
   )
 }
 
-export default function OrderBar({ items: initialItems, onReorder, onToggle }: OrderBarProps) {
+export default function OrderBar({ items: initialItems, onReorder, onToggle, highlightError }: OrderBarProps) {
 
   const handleToggle = (id: string) => {
     onToggle?.(id);
@@ -107,7 +108,10 @@ export default function OrderBar({ items: initialItems, onReorder, onToggle }: O
   };
 
   return (
-    <div className="bg-background p-2 pl-1 pr-1 border rounded-xl shadow-lg z-50">
+    <div className={cn(
+      "bg-background p-2 pl-1 pr-1 border rounded-xl shadow-lg z-50 transition-all duration-300",
+      highlightError && "bg-foreground/20 dark:bg-foreground/30 border-foreground/50"
+    )}>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}

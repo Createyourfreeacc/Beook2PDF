@@ -1,49 +1,92 @@
-Beook2PDF is a Windows App that allows you to export content from the DRM-protected Beook application as PDF.
+# Beook2PDF
 
+A Windows application that exports content from the DRM-protected Beook e-learning platform to PDF format.
 
-🔨🔧🛠️🚧⚠>>> UNDER CONSTRUCTION <<<⚠🚧🛠️🔧🔨
+> 🛠️🚧⚠️ **Work in Progress** — This project is under active development and may not work for all users or configurations.
 
-Probably won't work for you! 
+## Features
 
-This is a vibe coded Next.js project. 
+- Extracts raw HTML/CSS content from the Beook SQLite database
+- Converts book pages to PDF using Puppeteer
+- Decrypts quiz questions and answers
+- Browse and select books from your Beook library
+- Modern web-based interface built with Next.js
 
-How it works basically:
-Gets the raw, unencrypted html and css for each page of any book from the Beook SQL database.
+## Requirements
 
-- Many ToDo's and missing features
-- Only tested for BAK Aviation learning material
-- Uses Puppeteer to convert HTML/CSS to PDF (Bad AI slop solution)
+- Windows 10 or later
+- Node.js 18+
+- Beook desktop application installed with downloaded books
 
-Quiz answers and questions are now decrypted but not yet added to the pdf.
+## Installation
 
+```bash
+git clone https://github.com/Createyourfreeacc/beook2pdf.git
+cd beook2pdf
+npm install
+```
 
-## Getting Started
+## Usage
 
-First, run the development server:
+Start the development server:
 
-      $ git clone https://github.com/Createyourfreeacc/beook2pdf.git
-      $ cd beook2pdf
-      $ npm install
-      $ npm run dev
+```bash
+npm run dev
+```
 
-Open http://localhost:3000 with your browser to see the result.
+Then open [http://localhost:3000](http://localhost:3000) in your browser.
 
+### Configuration
 
-If it doesn't work, you can try manually changing the paths, which are currently hardcoded as:
+The application looks for the Beook database at the default location:
 
-      $ "C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/2/data/beook_book_v6.sqlite"
+```
+C:/Users/{username}/AppData/Roaming/ionesoft/beook/release/profiles/2/data/beook_book_v6.sqlite
+```
 
+If your installation differs, you may need to update the path in the settings.
 
-## Crypto
+## Technical Details
 
-File: .global.keystore
-Java KeyStore via the java.security.KeyStore API
-JCEKS keystore implementation:
-PBE = Password-Based Encryption
-MD5 = hash function used in key derivation (PBKDF)
-TripleDES = the block cipher used to encrypt/decrypt the entry
-masterPassword = "TronkoXbalu.global.keystore8080"
+### Encryption
 
-DESEncrypter:
-const KEY_STRING = "fdäK?s^dw-+ç,W!El"; // full Java string
-const IV_STRING = "/D}$2al!"; // exactly 8 chars
+The Beook application uses multiple layers of encryption:
+
+**Keystore (`.global.keystore`)**
+- Java KeyStore via `java.security.KeyStore` API
+- JCEKS implementation with PBE (Password-Based Encryption)
+- Key derivation: MD5-based PBKDF
+- Cipher: TripleDES
+
+**Content Encryption (DESEncrypter)**
+- Algorithm: DES
+- 8-byte initialization vector
+
+## Tested Courses
+
+This tool has been tested with the following BAK Aviation learning materials:
+
+| ISBN |
+|------|
+| 978-3-905036-87-9 |
+| 978-3-03901-007-3 |
+| 978-3-905036-95-4 |
+| 978-3-03901-002-8 |
+| 978-3-03901-000-4 |
+| 978-3-03901-011-0 |
+| 978-3-03901-004-2 |
+| 978-3-03901-003-5 |
+| 978-3-905036-94-7 |
+| 978-3-905036-96-1 |
+| 978-3-03901-015-8 |
+| 978-3-905036-88-6 |
+
+## Known Limitations
+
+- Only tested with BAK Aviation learning materials
+- Quiz content is decrypted but not yet included in PDF output
+- PDF generation uses Puppeteer (may have performance implications for large books)
+
+## License
+This app, "Beook2Pdf", is an independent product and is not affiliated with Ionesoft, the publisher and developer of Beook. The use of the word "Beook" does not imply any official approval or partnership with Ionesoft.
+This project is for educational purposes only. Please respect the intellectual property rights of content creators and publishers.

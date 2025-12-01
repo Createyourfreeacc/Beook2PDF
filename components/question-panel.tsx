@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import AddQuizQuestionForm from "@/components/add-quiz-question-form";
-
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -151,12 +150,15 @@ export default function QuestionsPanel() {
 
     for (const row of items) {
       // respect current bookFilter when building chapter list
+      // Important: we only expose concrete chapter values once a specific
+      // book has been chosen. When the book filter is "all", no chapters
+      // are collected here so you cannot select a chapter without a book.
       const matchesBook =
         bookFilter === "all"
-          ? true
+          ? false
           : bookFilter === "none"
-          ? !row.book_ref
-          : row.book_ref === bookFilter;
+            ? !row.book_ref
+            : row.book_ref === bookFilter;
 
       if (!matchesBook) continue;
       if (!row.chapter_ref) continue;

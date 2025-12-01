@@ -168,28 +168,37 @@ export async function GET(request: Request) {
         const transformedImgResultList: any[] = [];
 
         resultList.forEach(rawData => {
-            const bookId = rawData["Z_PK"].toString();          // 1 Note: Beook2Pdf internal ID. Number taken from Z_PK but fundametally arbitrary and does not give any information about datastructure TODO: make it just the counter of the foreach to avoid confusion
-            const reference = rawData["ZREFERENCE"];            // 978-3-905036-95-4
-            const courseId = rawData["ZCOURSEID"];              // PPL020A
-            const courseProductNumber = 0;                      // 40       TODO: ADD BUT FOR WHAT
-            const title = titleMap[courseId] || [];             // Allgemeine Luftfahrzeugkenntnisse
-            const issueNumbers = issueMap[reference] || [];     // [[10, PPL020A00, Vorwort], [11, PPL020A01, 1 Einteilung der Luftfahrzeuge], [12, PPL020A02, 2 Komponenten eines Flugzeuges], [13, PPL020A03, 3 Flugzeugzelle (airfra...
-                                                                // TODO:rename to issues (everywhere (pain)) Should contain ZISSUEIDENTIFIER, ZISSUEPRODUCT and ZTITLE all from ZILPISSUEDEF (does not right now) order it like it is in ZORDER
+            const courseProductNumber = 0;
+            const reference = rawData["ZREFERENCE"]?.toString() || "";
+            const courseId = rawData["ZCOURSEID"]?.toString() || "";
 
+            // Look up issues for this course reference
+            const issueNumbers = issueMap[reference] ?? [];
+
+            // Important: if there are no issues at all for this reference, we
+            // treat it as a deleted / legacy / non-installed book and skip it.
+            if (issueNumbers.length === 0) {
+                return;
+            }
+
+            const bookId = rawData["Z_PK"].toString();
+            const title = titleMap[courseId] || [];
 
             transformedResultList.push({
-                BookID: bookId,
-                Titel: title,
-                CourseName: rawData["ZCOURSEID"] || '',
-                Refrence: reference || '',
-                Issue: issueNumbers,
-                Toggled: false
+                BookID: bookId,                         // 1 Note: Beook2Pdf internal ID. Number taken from Z_PK but fundametally arbitrary and does not give any information about datastructure TODO: make it just the counter of the foreach to avoid confusion
+                Titel: title,                           // Allgemeine Luftfahrzeugkenntnisse
+                CourseName: courseId,                   // PPL020A
+                Refrence: reference,                    // 978-3-905036-95-4
+                ProductNumber: courseProductNumber,     // 40       TODO: ADD BUT FOR WHAT
+                Issue: issueNumbers,                    // [[10, PPL020A00, Vorwort], [11, PPL020A01, 1 Einteilung der Luftfahrzeuge], [12, PPL020A02, 2 Komponenten eines Flugzeuges], [13, PPL020A03, 3 Flugzeugzelle (airfra...
+                                                        // TODO:rename to issues (everywhere (pain)) Should contain ZISSUEIDENTIFIER, ZISSUEPRODUCT and ZTITLE all from ZILPISSUEDEF (does not right now) order it like it is in ZORDER
+                Toggled: false,
             });
 
             transformedImgResultList.push({
                 BookID: bookId,
-                CourseName: rawData["ZCOURSEID"] || '',
-                SymbolImg: rawData["ZSYMBOLFILENAMELOWRESON"] || '',
+                CourseName: courseId,
+                SymbolImg: rawData["ZSYMBOLFILENAMELOWRESON"] || "",
                 // TODO: IMAGES UNUSED REMOVE IN PROD
                 //SymbolImgTransparent: rawData["ZSYMBOLFILENAMELOWRESOFF"] || ''
                 //CoverImage: rawData["ZCOVERFILENAMELOWRES"] || '',

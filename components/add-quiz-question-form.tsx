@@ -30,6 +30,13 @@ type BookApiItem = {
   Issue: number[];
 };
 
+type ChapterApiItem = {
+  chapterId: number;
+  title: string;
+  ref: string;
+  issueId: string | null;
+};
+
 function getBookLabel(book: BookApiItem): string {
   if (Array.isArray(book.Titel)) {
     if (book.Titel.length > 0 && book.Titel[0]) return book.Titel[0] as string;
@@ -56,7 +63,12 @@ export default function AddQuizQuestionForm() {
   // selectedBookRef is either "none" or the actual Refrence string
   const [selectedBookRef, setSelectedBookRef] = useState<string>("none");
 
-  // Chapter stays optional/mock for now
+  // Chapters for the currently selected book
+  const [chapters, setChapters] = useState<ChapterApiItem[]>([]);
+  const [chaptersLoading, setChaptersLoading] = useState(false);
+  const [chaptersError, setChaptersError] = useState<string | null>(null);
+
+  // Selected chapter reference (ZPRODUCTREFERENCE) or "none"
   const [selectedChapter, setSelectedChapter] = useState<string>("none");
 
   // Optional asset
@@ -84,6 +96,69 @@ export default function AddQuizQuestionForm() {
     };
     loadBooks();
   }, []);
+
+  useEffect(() => {
+    // Whenever the selected book changes, load its chapters from the DB.
+    // If no book is selected ("none"), chapters stay empty and the chapter
+    // dropdown is effectively disabled.
+    if (!selectedBookRef || selectedBookRef === "none") {
+      setChapters([]);
+      setChaptersError(null);
+      setChaptersLoading(false);
+      // Also reset any previously selected chapter
+      setSelectedChapter("none");
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadChapters = async () => {
+      try {
+        setChaptersLoading(true);
+        setChaptersError(null);
+
+        const params = new URLSearchParams({ bookRef: selectedBookRef });
+        const res = await fetch(`/api/getChapters?${params.toString()}`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+
+        if (!data?.success) {
+          throw new Error(data?.error || "Failed to load chapters");
+        }
+
+        const list = (data.chapters ?? []) as ChapterApiItem[];
+        if (!cancelled) {
+          setChapters(list);
+          // If the currently selected chapter is not part of this book anymore,
+          // reset it back to "none".
+          if (
+            selectedChapter !== "none" &&
+            !list.some((c) => c.ref === selectedChapter)
+          ) {
+            setSelectedChapter("none");
+          }
+        }
+      } catch (err: any) {
+        console.error("Failed to fetch chapters:", err);
+        if (!cancelled) {
+          setChapters([]);
+          setChaptersError("Could not load chapters.");
+        }
+      } finally {
+        if (!cancelled) {
+          setChaptersLoading(false);
+        }
+      }
+    };
+
+    loadChapters();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBookRef, selectedChapter]);
 
   const addWrongAnswer = () => {
     if (wrongAnswers.length < 30) setWrongAnswers((prev) => [...prev, ""]);
@@ -213,7 +288,7 @@ export default function AddQuizQuestionForm() {
   return (
     <Card className="h-fit-[28rem]">
       <CardHeader>
-        <CardTitle>Add custom quiz question</CardTitle>
+        <CardTitle>Add custom quiz</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -228,7 +303,11 @@ export default function AddQuizQuestionForm() {
                 </Label>
                 <Select
                   value={selectedBookRef}
-                  onValueChange={setSelectedBookRef}
+                  onValueChange={(value) => {
+                    setSelectedBookRef(value);
+                    // Reset chapter whenever the book changes so we don't mix chapters from different books.
+                    setSelectedChapter("none");
+                  }}
                 >
                   <SelectTrigger className="mt-1">
                     <SelectValue
@@ -255,25 +334,48 @@ export default function AddQuizQuestionForm() {
                 )}
               </div>
 
-              {/* CHAPTER SELECT (still mock/optional) */}
+              {/* CHAPTER SELECT (driven by real chapters for the chosen book) */}
               <div>
                 <Label className="text-xs text-muted-foreground">
-                  Chapter (placeholder)
+                  Chapter
                 </Label>
                 <Select
                   value={selectedChapter}
                   onValueChange={setSelectedChapter}
+                  disabled={
+                    !selectedBookRef ||
+                    selectedBookRef === "none" ||
+                    chaptersLoading
+                  }
                 >
                   <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select a chapter (optional)" />
+                    <SelectValue
+                      placeholder={
+                        !selectedBookRef || selectedBookRef === "none"
+                          ? "Select a book first"
+                          : chaptersLoading
+                            ? "Loading chapters..."
+                            : "Select a chapter (optional)"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">None</SelectItem>
-                    <SelectItem value="1">1 – Mock Chapter</SelectItem>
-                    <SelectItem value="2">2 – Mock Chapter</SelectItem>
-                    <SelectItem value="3">3 – Mock Chapter</SelectItem>
+                    {chapters.map((c) => (
+                      <SelectItem
+                        key={c.ref || String(c.chapterId)}
+                        value={c.ref}
+                      >
+                        {c.issueId ? `${c.issueId} – ${c.title}` : c.title}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+                {chaptersError && selectedBookRef !== "none" && (
+                  <p className="text-[11px] text-destructive mt-1">
+                    {chaptersError}
+                  </p>
+                )}
               </div>
             </div>
             <p className="text-[11px] text-muted-foreground">

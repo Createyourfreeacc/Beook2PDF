@@ -64,7 +64,7 @@ The Beook application uses multiple layers of encryption:
 
 ## Tested Courses
 
-This tool has been tested with the following BAK Aviation learning materials:
+This tool has been tested with the following learning materials:
 
 | ISBN |
 |------|

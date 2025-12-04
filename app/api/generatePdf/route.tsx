@@ -5,9 +5,7 @@
 //       this info could then be used to determin each pages content (chapter/topic/page num)
 //       could be used to make links within the book functional, display page num, place quiz at correct place, create better toc and so forth
 
-// TODO: should the pagenumber of the book be respected or the pagenumber of the entire export/pdf?
-// read the pageInfo span before hiding it, and re-render a clean, consistent page number in the PDF margin
-// TODO: add pagenumber back into the page
+// TODO: add back navigation/footer??????
 
 // TODO: to fix toc with wrong pagenumber bug merge logic with how it is found for the pdf page number that is shown
 

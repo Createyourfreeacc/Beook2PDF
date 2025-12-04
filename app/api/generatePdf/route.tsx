@@ -9,6 +9,8 @@
 // read the pageInfo span before hiding it, and re-render a clean, consistent page number in the PDF margin
 // TODO: add pagenumber back into the page
 
+// TODO: to fix toc with wrong pagenumber bug merge logic with how it is found for the pdf page number that is shown
+
 import { NextRequest, NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
 import puppeteer from 'puppeteer';
@@ -57,6 +59,20 @@ interface TOCData {
   zOrder: number;
   zIssue: number;
   zLevel: number;
+}
+
+function getPageInfoNumber(html: string): number | null {
+  const target = '<span class="pageInfo">';
+  const startIndex = html.lastIndexOf(target);
+  if (startIndex === -1) return null;
+
+  const contentStart = startIndex + target.length;
+  const endIndex = html.indexOf('</span>', contentStart);
+  if (endIndex === -1) return null;
+
+  const insideText = html.slice(contentStart, endIndex).trim();
+  const numberMatch = insideText.match(/\d+/);
+  return numberMatch ? parseInt(numberMatch[0], 10) : null;
 }
 
 export async function GET(request: NextRequest) {
@@ -343,9 +359,17 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
   // A4 size in PDF points (72 pt/inch)
   const A4_WIDTH = 595.28;
   const A4_HEIGHT = 841.89;
-  const pdfDocuments = await Promise.all(pdfBuffers.map(buffer => PDFDocument.load(buffer)));
+
+  // One printed page number (or null) per HTML page, in order
+  const printedPageNumbers: (number | null)[] = htmlPages.map(getPageInfoNumber);
+
+  // Font for page numbers
+  const pageNumberFont = await mergedPdfDoc.embedFont(StandardFonts.Helvetica);
 
   setPhaseProgress(jobId, 'merge', 0.3);
+
+  let pageIndex = 0;
+
   // For each generated per-page PDF buffer, embed and scale into A4
   for (const buffer of pdfBuffers) {
     if (!buffer) continue;
@@ -373,6 +397,29 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
         width: scaledWidth,
         height: scaledHeight,
       });
+
+
+      // draw printed page number, if available
+      const printedNumber = printedPageNumbers[pageIndex] ?? null;
+      if (printedNumber != null) {
+        const text = String(printedNumber);
+        const fontSize = 10;
+        const textWidth = pageNumberFont.widthOfTextAtSize(text, fontSize);
+
+        const bottomMargin = 24;  // ~1/3 inch from bottom
+        const xCenter = (A4_WIDTH - textWidth) / 2;
+        const yBottom = bottomMargin;
+
+        page.drawText(text, {
+          x: xCenter,
+          y: yBottom,
+          size: fontSize,
+          font: pageNumberFont,
+          color: rgb(0, 0, 0),
+        });
+      }
+
+      pageIndex++;
     }
   }
 

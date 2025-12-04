@@ -407,11 +407,14 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
         const textWidth = pageNumberFont.widthOfTextAtSize(text, fontSize);
 
         const bottomMargin = 24;  // ~1/3 inch from bottom
-        const xCenter = (A4_WIDTH - textWidth) / 2;
+        const xCenter = (A4_WIDTH - textWidth) / 2; // center page number
         const yBottom = bottomMargin;
 
+        const rightMargin = 24;   // distance from right edge
+        const xRight = A4_WIDTH - rightMargin - textWidth;
+
         page.drawText(text, {
-          x: xCenter,
+          x: xRight,
           y: yBottom,
           size: fontSize,
           font: pageNumberFont,

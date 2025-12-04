@@ -1,15 +1,38 @@
 //first get all resources neccessary
 //second stitch together the content
 //third load content and convert to pdf
+// TODO: navigation/footer space is removed but should be used in the background to gain additional info for each page!
+//       this info could then be used to determin each pages content (chapter/topic/page num)
+//       could be used to make links within the book functional, display page num, place quiz at correct place, create better toc and so forth
+
+// TODO: should the pagenumber of the book be respected or the pagenumber of the entire export/pdf?
+// read the pageInfo span before hiding it, and re-render a clean, consistent page number in the PDF margin
+// TODO: add pagenumber back into the page
 
 import { NextRequest, NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
 import puppeteer from 'puppeteer';
-import { PDFDocument, PDFName, PDFString, PDFArray, PDFNull, PDFDict, PDFRef, PDFNumber } from 'pdf-lib';
+import {
+  PDFDocument,
+  PDFName,
+  PDFString,
+  PDFArray,
+  PDFNull,
+  PDFDict,
+  PDFRef,
+  PDFNumber,
+  StandardFonts,
+  rgb,
+} from 'pdf-lib';
 import { setProgress, setPhaseProgress } from '@/lib/progressStore';
 import { getResolvedPaths } from '@/lib/config';
 
 const { dbPath: DB_PATH } = getResolvedPaths();
+
+// High-DPI A4-ish canvas (≈300 DPI)
+// 210mm x 297mm @ ~294 DPI -> ~2434 x 3445 px
+const PAGE_WIDTH_PX = 2434;
+const PAGE_HEIGHT_PX = 3445;
 
 type Book = {
   BookID: string;
@@ -105,6 +128,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('PDF generation failed:', error);
+    //TODO: replace with new setPhaseProgress
     setProgress(jobId, 0);
     return new Response(JSON.stringify({ error: 'Failed to generate PDF' }), {
       status: 500,
@@ -241,6 +265,24 @@ export async function modifyContent(books: Book[], dataMap: Record<string, { Z_P
                 <style>
                   ${fetchedCss}
                 </style>
+                <style>
+                  /* beook2pdf overrides:
+                     - remove internal navigation UI and page number from the canvas
+                     - keep only the actual page content
+                  */
+                  .navigationWrapper,
+                  .pageNavigationTable,
+                  .navigationMiniToc,
+                  .pageInfo {
+                    display: none !important;
+                  }
+
+                  /* Optional but helps avoid surprises from global margins */
+                  body {
+                    margin: 0;
+                    padding: 0;
+                  }
+                </style>
             </head>
             ${modifiedHtml}
         </html>
@@ -274,16 +316,17 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
 
   const processPageBatch = async (startIndex: number) => {
     const page = await browser.newPage();
-    await page.setViewport({ width: 2434, height: 3445 });
+    await page.setViewport({ width: PAGE_WIDTH_PX, height: PAGE_HEIGHT_PX });
 
-    for (let i = startIndex; i < Math.min(startIndex + maxConcurrentProcesses, pageCount); i++) {
+    for (
+      let i = startIndex;
+      i < Math.min(startIndex + maxConcurrentProcesses, pageCount);
+      i++
+    ) {
       pdfBuffers[i] = await processPage(page, htmlPages[i], i);
-      pagesProcessed++;
-      setPhaseProgress(jobId, 'convert', Math.min(pagesProcessed / pageCount, 0.95));
     }
 
     await page.close();
-
   };
 
   const promises = [];
@@ -296,19 +339,41 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
 
   setPhaseProgress(jobId, 'convert', 1);
   const mergedPdfDoc = await PDFDocument.create();
+
+  // A4 size in PDF points (72 pt/inch)
+  const A4_WIDTH = 595.28;
+  const A4_HEIGHT = 841.89;
   const pdfDocuments = await Promise.all(pdfBuffers.map(buffer => PDFDocument.load(buffer)));
 
   setPhaseProgress(jobId, 'merge', 0.3);
-  for (const pdf of pdfDocuments) {
-    const copiedPages = await mergedPdfDoc.copyPages(pdf, pdf.getPageIndices());
-    copiedPages.forEach(page => {
-      // Set dimensions BEFORE adding the page
-      // TODO: This creates consistent page sizes but needs work to properly show the content
-      //page.setMediaBox(0, 0, 2434, 3445);
+  // For each generated per-page PDF buffer, embed and scale into A4
+  for (const buffer of pdfBuffers) {
+    if (!buffer) continue;
 
-      // Then add to merged document
-      mergedPdfDoc.addPage(page);
-    });
+    // Embed all pages from this buffer (should usually be a single page)
+    const embeddedPages = await mergedPdfDoc.embedPdf(buffer);
+
+    for (const embeddedPage of embeddedPages) {
+      const { width, height } = embeddedPage;
+
+      // Compute scale so the entire original page fits into A4
+      const scale = Math.min(A4_WIDTH / width, A4_HEIGHT / height);
+
+      const { width: scaledWidth, height: scaledHeight } = embeddedPage.scale(scale);
+
+      // Create a new A4 page and center the embedded page on it
+      const page = mergedPdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
+
+      const x = (A4_WIDTH - scaledWidth) / 2;
+      const y = (A4_HEIGHT - scaledHeight) / 2;
+
+      page.drawPage(embeddedPage, {
+        x,
+        y,
+        width: scaledWidth,
+        height: scaledHeight,
+      });
+    }
   }
 
   const entries = await getTOCData();
@@ -373,36 +438,77 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
   return await PdfDoc.save();
 }
 
-async function processPage(page: puppeteer.Page, htmlContent: string, index: number): Promise<Buffer> {
+async function processPage(
+  page: puppeteer.Page,
+  htmlContent: string,
+  index: number
+): Promise<Buffer> {
   try {
     await page.setContent(htmlContent, {
       waitUntil: ['domcontentloaded', 'load'],
     });
 
-    // Measure content dimensions
-    const dimensions = await page.evaluate(() => {
-      const body = document.body;
-      return {
-        width: Math.max(body.scrollWidth, body.offsetWidth),
-        height: Math.max(body.scrollHeight, body.offsetHeight),
-      };
+    // Remove margins so the page is just the content canvas
+    await page.evaluate(() => {
+      const html = document.documentElement as HTMLElement;
+      const body = document.body as HTMLElement;
+
+      html.style.margin = '0';
+      html.style.padding = '0';
+      body.style.margin = '0';
+      body.style.padding = '0';
+
+      const selectorsToHide = [
+        '.navigationWrapper',
+        '.pageNavigationTable',
+        '.navigationMiniToc',
+        '.pageInfo',
+      ];
+
+      selectorsToHide.forEach((sel) => {
+        document.querySelectorAll(sel).forEach((el) => {
+          (el as HTMLElement).style.display = 'none';
+        });
+      });
     });
 
-    // Generate PDF with exact content dimensions
+    // Measure the true content canvas using both body & document
+    const dimensions = await page.evaluate(() => {
+      const body = document.body as HTMLElement;
+      const docEl = document.documentElement as HTMLElement;
+
+      const width = Math.max(
+        body.scrollWidth,
+        docEl.scrollWidth,
+        body.offsetWidth,
+        docEl.offsetWidth
+      );
+      const height = Math.max(
+        body.scrollHeight,
+        docEl.scrollHeight,
+        body.offsetHeight,
+        docEl.offsetHeight
+      );
+
+      return { width, height };
+    });
+
+    const contentWidth = Math.max(dimensions.width || 1, 1);
+    const contentHeight = Math.max(dimensions.height || 1, 1);
+
+    // Let Puppeteer render the page at its natural size – no scaling.
+    // This PDF now contains the full content.
     const pdf = await page.pdf({
-      width: dimensions.width,
-      height: dimensions.height,
-      //width: '2434px',
-      //height: '3445px',
+      width: contentWidth,
+      height: contentHeight,
       printBackground: true,
-      margin: { top: 72, right: 72, bottom: 72, left: 72 },
-      //margin: { top: 0, right: 0, bottom: 0, left: 0 }, // optional: remove default margins
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
     });
 
     return Buffer.from(pdf);
   } catch (error) {
-    console.error('Error:', error);
-    throw new Error('Failed');
+    console.error('Error while processing page', index, error);
+    throw new Error('Failed to generate page PDF');
   }
 }
 

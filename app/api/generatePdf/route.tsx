@@ -424,35 +424,20 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
     }
   }
 
-  const entries = await getTOCData();
-  //TODO: The page is wrong, especially if there are multiple books
   function extractPageNumbers(htmlPages: string[]): (number | null)[][] {
     const result: (number | null)[][] = [];
     let currentGroup: (number | null)[] = [];
 
-    const getNumberFromHTML = (html: string): number | null => {
-      const target = '<span class="pageInfo">';
-      const startIndex = html.lastIndexOf(target);
-      if (startIndex === -1) return null;
-
-      const contentStart = startIndex + target.length;
-      const endIndex = html.indexOf("</span>", contentStart);
-      if (endIndex === -1) return null;
-
-      const insideText = html.slice(contentStart, endIndex).trim();
-      const numberMatch = insideText.match(/\d+/);
-      return numberMatch ? parseInt(numberMatch[0], 10) : null;
-    };
-
     let lastNumber: number | null = null;
 
     for (const html of htmlPages) {
-      const pageNumber = getNumberFromHTML(html);
+      const pageNumber = getPageInfoNumber(html);
 
+      // whenever the printed number jumps backwards, start a new group (new book)
       if (
         lastNumber !== null &&
         pageNumber !== null &&
-        pageNumber < lastNumber // break condition
+        pageNumber < lastNumber
       ) {
         result.push(currentGroup);
         currentGroup = [];
@@ -464,7 +449,7 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
       }
     }
 
-    // Push the last group if it has any elements
+    // push last group
     if (currentGroup.length > 0) {
       result.push(currentGroup);
     }
@@ -472,14 +457,8 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
     return result;
   }
   const pageNum = extractPageNumbers(htmlPages);
+  const entries = await getTOCData();
   const tocOutline = await generateTOCOutline(books, entries, pageNum);
-
-  //TODO: REMOVE DEBUG MSG
-  //console.log(pageNum);
-  /*   tocOutline.forEach((item, index) => {
-      console.log(item);
-    }); */
-
   const PdfDoc = await mergeWithOutlines(mergedPdfDoc, tocOutline);
 
   setPhaseProgress(jobId, 'merge', 1);
@@ -724,6 +703,7 @@ async function generateTOCOutline(books: Book[], entries: TOCData[], pageNum: (n
 
           i = j + 1;
         } else {
+          // Potential BUG: Does not use the same mapping logic as for block entries
           tocOutline.push({
             title: `${entry.chapterSection} ${entry.title}`.trim(),
             page: entry.pagenum - 1,

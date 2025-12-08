@@ -9,6 +9,14 @@
 
 // TODO: to fix toc with wrong pagenumber bug merge logic with how it is found for the pdf page number that is shown
 
+//TODO: BUG: Does not export text as Italic, creates strange gaps. Are all fonts gone???
+
+//TODO: BUG: Hyphen are stuck on the right side of the page.
+
+//TODO: Show page info in pdf footer (use last/next page info text for the current page)
+
+//TODO: Add Fonts
+
 import { NextRequest, NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
 import puppeteer from 'puppeteer';

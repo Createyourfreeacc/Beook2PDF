@@ -9,13 +9,7 @@
 
 // TODO: to fix toc with wrong pagenumber bug merge logic with how it is found for the pdf page number that is shown
 
-//TODO: BUG: Does not export text as Italic, creates strange gaps. Are all fonts gone???
-
-//TODO: BUG: Hyphen are stuck on the right side of the page.
-
 //TODO: Show page info in pdf footer (use last/next page info text for the current page)
-
-//TODO: Add Fonts
 
 import { NextRequest, NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
@@ -170,6 +164,100 @@ export async function getMaxZPk(): Promise<number> {
   return maxZPkResult.maxZPk;
 }
 
+// Map ZMEDIATYPE → MIME type we want in the data: URL
+function mapFontMimeType(mediatype?: string | null): string {
+  if (!mediatype) return 'font/woff';
+
+  const mt = mediatype.toLowerCase();
+
+  if (mt.includes('font-woff')) return 'font/woff';
+  if (mt.includes('font-ttf')) return 'font/ttf';
+  if (mt.includes('opentype')) return 'font/otf';
+
+  // Fallback – most of your fonts are application/font-woff
+  return 'font/woff';
+}
+
+/**
+ * Take the raw CSS from ZILPRESOURCE and inline any @font-face src:url(<id>)
+ * as data: URLs by loading the font blobs from the SQLite DB.
+ *
+ * Only used in the PDF generator (not the reader).
+ */
+function embedFontsIntoCss(css: string): string {
+  if (!css) return css;
+
+  // Find all numeric URLs: url(389), url(387), ...
+  // In your data these only appear in @font-face rules.
+  const urlRegex = /url\((\d+)\)/g;
+  const fontIds = new Set<number>();
+
+  let match: RegExpExecArray | null;
+  while ((match = urlRegex.exec(css)) !== null) {
+    const id = parseInt(match[1], 10);
+    if (!Number.isNaN(id)) {
+      fontIds.add(id);
+    }
+  }
+
+  if (fontIds.size === 0) {
+    return css; // nothing to do
+  }
+
+  let db: sqlite.Database | null = null;
+  const idToDataUrl: Record<number, string> = {};
+
+  try {
+    db = sqlite(DB_PATH);
+
+    const stmt = db.prepare(
+      `SELECT "ZDATA", "ZMEDIATYPE" FROM "ZILPRESOURCE" WHERE "Z_PK" = ?`
+    );
+
+    for (const id of fontIds) {
+      try {
+        const row = stmt.get(id) as { ZDATA?: any; ZMEDIATYPE?: string } | undefined;
+
+        if (!row || !row.ZDATA) {
+          continue;
+        }
+
+        const buffer: Buffer = Buffer.isBuffer(row.ZDATA)
+          ? row.ZDATA
+          : Buffer.from(row.ZDATA as any);
+
+        const base64 = buffer.toString('base64');
+        const mime = mapFontMimeType(row.ZMEDIATYPE);
+        const dataUrl = `data:${mime};base64,${base64}`;
+
+        idToDataUrl[id] = dataUrl;
+      } catch (err) {
+        console.error('Failed to embed font with Z_PK =', id, err);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to open DB for font embedding', err);
+    return css; // degrade gracefully
+  } finally {
+    if (db) {
+      db.close();
+    }
+  }
+
+  // Replace url(<id>) with url("data:...") in the CSS string
+  let resultCss = css;
+
+  for (const [idStr, dataUrl] of Object.entries(idToDataUrl)) {
+    const id = Number(idStr);
+    if (!dataUrl) continue;
+
+    const re = new RegExp(`url\\(${id}\\)`, 'g');
+    resultCss = resultCss.replace(re, `url("${dataUrl}")`);
+  }
+
+  return resultCss;
+}
+
 export async function modifyContent(books: Book[], dataMap: Record<string, { Z_PK: number; ZDATA: any; ZTOPIC: number; ZMEDIATYPE: string; ZISSUE: string }>, jobId: string): Promise<string[]> {
   const htmlPages: string[] = [];
   const sortedEntries: {
@@ -261,6 +349,11 @@ export async function modifyContent(books: Book[], dataMap: Record<string, { Z_P
       let fetchedCss = "";
       if (cssId !== null && dataMap[cssId]?.ZDATA) {
         fetchedCss = dataMap[cssId].ZDATA;
+      }
+
+      // Embed font blobs as data: URLs so Puppeteer can actually use them
+      if (fetchedCss) {
+        fetchedCss = embedFontsIntoCss(fetchedCss);
       }
 
       /* this is stuff for pagesize it replaces the body with a div so the body can be sized well (not complete needs change when stitching together)

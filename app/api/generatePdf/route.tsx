@@ -1025,6 +1025,9 @@ export async function getTOCData(): Promise<TOCData[]> {
 }
 
 // BUG: Outline doesn't work on firefox. Warning: Unable to read document outline.
+//      Only happens if the book FACH 030 PPL (A) FLUGLEISTUNGEN UND FLUGPLANUNG is included.
+// Bug: FACH 062 PPL FUNKNAVIGATION (RADIONAVIGATION) overview sometimes trims entire 6th chapter and
+//      Angang is not always first as compared to Seite (95)
 export async function addOutlineToPdf(
   mergedPdfDoc: PDFDocument,
   tocdata: MergedTOCEntry[][]

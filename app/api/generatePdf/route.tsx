@@ -643,6 +643,33 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
       });
     }
 
+    // After you've built tempResult[bookIdx] but before sorting:
+    for (const bookEntries of tempResult) {
+      for (let i = bookEntries.length - 1; i >= 0; i--) {
+        const e = bookEntries[i];
+
+        // Must have a valid mapped PDF page
+        if (!Number.isFinite(e.pdfPage) || e.pdfPage <= 0) {
+          bookEntries.splice(i, 1);
+          continue;
+        }
+
+        // Book page sanity
+        if (!Number.isFinite(e.bookPage) || e.bookPage <= 0) {
+          bookEntries.splice(i, 1);
+          continue;
+        }
+
+        // Label sanity
+        if (!e.label || typeof e.label !== 'string' || e.label.trim().length === 0) {
+          bookEntries.splice(i, 1);
+          continue;
+        }
+
+        e.label = e.label.trim();
+      }
+    }
+
     // Sort each book’s TOC entries by book page, then by ZORDER
     const result: MergedTOCEntry[][] = tempResult.map((bookEntries, bookIdx) => {
       bookEntries.sort((a, b) => {
@@ -1024,9 +1051,7 @@ export async function getTOCData(): Promise<TOCData[]> {
   }
 }
 
-// BUG: Outline doesn't work on firefox. Warning: Unable to read document outline.
-//      Only happens if the book FACH 030 PPL (A) FLUGLEISTUNGEN UND FLUGPLANUNG is included.
-// Bug: FACH 062 PPL FUNKNAVIGATION (RADIONAVIGATION) overview sometimes trims entire 6th chapter and
+// TODO: Ordering is borked Bug: FACH 062 PPL FUNKNAVIGATION (RADIONAVIGATION) overview sometimes trims entire 6th chapter and
 //      Angang is not always first as compared to Seite (95)
 export async function addOutlineToPdf(
   mergedPdfDoc: PDFDocument,
@@ -1150,7 +1175,11 @@ export async function addOutlineToPdf(
       } = buildOutlineTree(node.children, thisRef);
 
       const outlineDictEntries: Record<string, any> = {
-        Title: PDFString.of(node.title),
+        // ensures titles are safely escaped according to the PDF spec §7.3.4.2 “Literal Strings”.
+        // prevents pdf-lib from creating malformed pdf outlines
+        Title: PDFString.of(
+          node.title.replace(/([()\\])/g, '\\$1')
+        ),
         Parent: parentRef,
         Dest: destArray,
       };

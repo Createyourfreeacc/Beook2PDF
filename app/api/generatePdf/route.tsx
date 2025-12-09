@@ -7,8 +7,6 @@
 
 // TODO: add back navigation/footer??????
 
-// TODO: to fix toc with wrong pagenumber bug merge logic with how it is found for the pdf page number that is shown
-
 //TODO: Show page info in pdf footer (use last/next page info text for the current page)
 
 //TODO: show title of book on the left bottom footer??? & Fach 010, if somehow possible

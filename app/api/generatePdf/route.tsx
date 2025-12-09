@@ -11,6 +11,8 @@
 
 //TODO: Show page info in pdf footer (use last/next page info text for the current page)
 
+//TODO: show title of book on the left bottom footer??? & Fach 010, if somehow possible
+
 import { NextRequest, NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
 import puppeteer from 'puppeteer';
@@ -44,12 +46,6 @@ type Book = {
   Issue: number[];
   Toggled: boolean;
 };
-
-interface TOCItem {
-  title: string;
-  page: number;
-  level: number;
-}
 
 interface TOCData {
   zpk: number;
@@ -525,29 +521,38 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
     }
   }
 
-  function extractPageNumbers(htmlPages: string[]): (number | null)[][] {
-    const result: (number | null)[][] = [];
-    let currentGroup: (number | null)[] = [];
+  // [pdf page number, book page number]
+  type PageMapping = [number, number | null];
 
-    let lastNumber: number | null = null;
+  function extractPageNumbers(htmlPages: string[]): PageMapping[][] {
+    const result: PageMapping[][] = [];
+    let currentGroup: PageMapping[] = [];
+
+    let lastBookPage: number | null = null;
+    let pdfPage = 1; // PDF pages are 1-based and just count up globally
 
     for (const html of htmlPages) {
-      const pageNumber = getPageInfoNumber(html);
+      const bookPage = getPageInfoNumber(html); // number | null
 
       // whenever the printed number jumps backwards, start a new group (new book)
       if (
-        lastNumber !== null &&
-        pageNumber !== null &&
-        pageNumber < lastNumber
+        lastBookPage !== null &&
+        bookPage !== null &&
+        bookPage < lastBookPage
       ) {
         result.push(currentGroup);
         currentGroup = [];
+        lastBookPage = null; // reset for the new book
       }
 
-      currentGroup.push(pageNumber);
-      if (pageNumber !== null) {
-        lastNumber = pageNumber;
+      // push [pdf page number, book page number]
+      currentGroup.push([pdfPage, bookPage]);
+
+      if (bookPage !== null) {
+        lastBookPage = bookPage;
       }
+
+      pdfPage += 1;
     }
 
     // push last group
@@ -557,10 +562,130 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
 
     return result;
   }
+
+  // [pdf page number, book page number, toc item titel, toc item level]
+  type MergedTOCEntry = [number, number | null, string, number];
+
+  function mergeTOCData(
+    books: Book[],
+    entries: TOCData[],
+    pageNum: PageMapping[][]
+  ): MergedTOCEntry[][] {
+    // Only books that are actually exported
+    const toggledBooks = books.filter((b) => b.Toggled);
+
+    // pageNum groups are created in the same order as we looped over books in generatePdf
+    // (for each toggled book, in order), so index 0 in pageNum == first toggled book, etc.
+    const groupCount = Math.min(toggledBooks.length, pageNum.length);
+
+    // Map each issue number (ZISSUE / ZISSUEPRODUCT) to the index of the book group
+    const issueToBookIndex = new Map<number, number>();
+    for (let i = 0; i < groupCount; i++) {
+      const book = toggledBooks[i];
+      for (const issue of book.Issue) {
+        issueToBookIndex.set(Number(issue), i);
+      }
+    }
+
+    // For each group/book: map "book printed page" -> "global pdf page"
+    const pageMapPerBook: Map<number, number>[] = [];
+    for (let i = 0; i < groupCount; i++) {
+      const m = new Map<number, number>();
+      const group = pageNum[i] || [];
+
+      for (const [pdfPage, bookPage] of group) {
+        if (bookPage == null) continue;
+        const bp = Number(bookPage);
+        if (!Number.isFinite(bp)) continue;
+
+        // If multiple pdf pages share the same printed page, keep the first occurrence
+        if (!m.has(bp)) m.set(bp, pdfPage);
+      }
+
+      pageMapPerBook[i] = m;
+    }
+
+    type TempEntry = {
+      pdfPage: number;
+      bookPage: number;
+      label: string;
+      level: number;
+      order: number;
+    };
+
+    const tempResult: TempEntry[][] = Array.from(
+      { length: groupCount },
+      () => []
+    );
+
+    for (const entry of entries) {
+      const bookIdx = issueToBookIndex.get(Number(entry.zIssue));
+      if (bookIdx === undefined) continue; // TOC for a non-exported book
+
+      const pageMap = pageMapPerBook[bookIdx];
+      if (!pageMap) continue;
+
+      // ZPAGENUMBER comes from SQLite as text -> convert to number
+      const bookPageNum = Number(entry.pagenum);
+      if (!Number.isFinite(bookPageNum)) continue;
+
+      const pdfPage = pageMap.get(bookPageNum);
+      if (pdfPage === undefined) continue; // that printed page isn't in the export
+
+      const label =
+        (entry.chapterSection ? entry.chapterSection + ' ' : '') +
+        entry.title;
+
+      tempResult[bookIdx].push({
+        pdfPage,
+        bookPage: bookPageNum,
+        label,
+        level: entry.zLevel,
+        order: entry.zOrder,
+      });
+    }
+
+    // Sort each book’s TOC entries by book page, then by ZORDER
+    const result: MergedTOCEntry[][] = tempResult.map((bookEntries) => {
+      bookEntries.sort((a, b) => {
+        if (a.bookPage !== b.bookPage) return a.bookPage - b.bookPage;
+        if (a.order !== b.order) return a.order - b.order;
+        return a.label.localeCompare(b.label);
+      });
+
+      // SPECIAL CASE:
+      // If the first 2 entries are on the same page and the first one
+      // is "less top-level" (higher order or same order but deeper level),
+      // drop the first one. This filters out "FACH 010" etc.
+      if (bookEntries.length >= 2) {
+        const first = bookEntries[0];
+        const second = bookEntries[1];
+
+        const samePage =
+          first.bookPage === second.bookPage &&
+          first.pdfPage === second.pdfPage;
+
+        const firstHasHigherOrder = first.order > second.order;
+        const sameOrderFirstDeeper =
+          first.order === second.order && first.level > second.level;
+
+        if (samePage && (firstHasHigherOrder || sameOrderFirstDeeper)) {
+          bookEntries.shift();
+        }
+      }
+
+      return bookEntries.map(
+        (e) => [e.pdfPage, e.bookPage, e.label, e.level] as MergedTOCEntry
+      );
+    });
+
+    return result;
+  }
+
   const pageNum = extractPageNumbers(htmlPages);
   const entries = await getTOCData();
-  const tocOutline = await generateTOCOutline(books, entries, pageNum);
-  const PdfDoc = await mergeWithOutlines(mergedPdfDoc, tocOutline);
+  const tocData = mergeTOCData(books, entries, pageNum);
+  const PdfDoc = await addOutlineToPdf(mergedPdfDoc, tocData);
 
   setPhaseProgress(jobId, 'merge', 1);
   return await PdfDoc.save();
@@ -701,121 +826,6 @@ export async function fetchPaginatedData(offset: number, limit: number, maxZPk: 
     console.error('Error querying database:', error);
     throw new Error('Failed to fetch data');
   }
-}
-
-async function generateTOCOutline(books: Book[], entries: TOCData[], pageNum: (number | null)[][]): Promise<TOCItem[]> {
-  const tocOutline: TOCItem[] = [];
-
-  //TODO: REMOVE DEBUG
-  console.log(pageNum);
-
-  function findGlobalPageIndexForPrintedNumber(
-    bookNum: number,
-    printedNum: number,
-    pageNum: (number | null)[][]): number | null {
-    // defensive checks
-    if (printedNum == null) return null;
-    const bookPages = pageNum?.[bookNum];
-    if (!bookPages || bookPages.length === 0) return null;
-
-    const target = Number(printedNum);
-    if (Number.isNaN(target)) return null;
-
-    // helper to find numeric index in bookPages
-    const findNumericIndex = (val: number) =>
-      bookPages.findIndex(p => p != null && Number(p) === val);
-
-    // try exact match first
-    let localIndex = findNumericIndex(target);
-
-    // if not found, try common off-by-one alternatives
-    if (localIndex === -1) localIndex = findNumericIndex(target - 1);
-    if (localIndex === -1) localIndex = findNumericIndex(target + 1);
-
-    if (localIndex === -1) return null;
-
-    // sum lengths of all book arrays before bookNum to get the global offset
-    let offset = 0;
-    for (let i = 0; i < bookNum; i++) {
-      const pagesForBook = pageNum?.[i];
-      if (pagesForBook && pagesForBook.length) offset += pagesForBook.length;
-    }
-
-    // global zero-based page index
-    return offset + localIndex;
-  }
-
-  books
-    .filter(book => book.Toggled)
-    .forEach((book, bookNum) => {
-      // 1. Get only the entries relevant to this book
-      const matchingEntries = entries.filter(entry =>
-        book.Issue.includes(entry.zIssue)
-      );
-
-      // 2. Sort same as before
-      matchingEntries.sort((a, b) => {
-        if (a.zIssue !== b.zIssue) return a.zIssue - b.zIssue;
-        if (a.pagenum !== b.pagenum) return a.pagenum - b.pagenum;
-        if (a.zOrder !== b.zOrder) return a.zOrder - b.zOrder;
-        return (a.chapterSection || '').localeCompare(b.chapterSection || '');
-      });
-
-      // 3. Create TOC items in the order of sorted entries
-      let i = 0;
-      while (i < matchingEntries.length) {
-        const entry = matchingEntries[i];
-
-        const startsBlock =
-          entry.zLevel >= 2 &&
-          i + 1 < matchingEntries.length &&
-          matchingEntries[i + 1].zLevel >= entry.zLevel;
-
-        if (startsBlock) {
-          const currentZLevel = entry.zLevel;
-          let j = i;
-
-          while (
-            j < matchingEntries.length &&
-            matchingEntries[j].zLevel >= currentZLevel
-          ) {
-            // compute actual page for matchingEntries[j]
-            const printed = matchingEntries[j].pagenum;
-            const globalIndex = findGlobalPageIndexForPrintedNumber(bookNum, printed, pageNum);
-            const actualPage = globalIndex !== null ? globalIndex : 0; // fallback to 0
-            //TODO: REMOVE DEBUG
-            console.log(printed);
-            console.log(globalIndex, "  ", actualPage);
-            // TODO: More testing required as it is still buggy. findGlobalPageIndexForPrintedNumber probably finds the correct pagenumber
-            //       but the level 1s never account for not being the first book. Also, not beeing the first book might send the user to one
-            //       page before the right page, subsequent books may be even more of, maybe 0 index bug.
-            //       Also, did not work with all my books, why, idk.
-            tocOutline.push({
-              title: `${matchingEntries[j].chapterSection} ${matchingEntries[j].title}`.trim(),
-              page: actualPage, // zero-based page index
-              level: matchingEntries[j].zLevel,
-            });
-
-            const next = matchingEntries[j + 1];
-            if (!next || next.zLevel <= 2) break;
-
-            j++;
-          }
-
-          i = j + 1;
-        } else {
-          // Potential BUG: Does not use the same mapping logic as for block entries
-          tocOutline.push({
-            title: `${entry.chapterSection} ${entry.title}`.trim(),
-            page: entry.pagenum - 1,
-            level: entry.zLevel,
-          });
-          i++;
-        }
-      }
-    });
-
-  return tocOutline;
 }
 
 async function generateTOCHtml(books: Book[], entries: TOCData[]): Promise<{ id: string; content: string }[]> {
@@ -978,73 +988,137 @@ export async function getTOCData(): Promise<TOCData[]> {
   }
 }
 
-// TODO: collapse/close every level except nr 1
-export async function mergeWithOutlines(
+// TODO: Show the Book Title as top most overview element (collapse its content)
+// BUG: Outline doesn't work on firefox. Warning: Unable to read document outline.
+export async function addOutlineToPdf(
   mergedPdfDoc: PDFDocument,
-  toc: TOCItem[]
+  tocdata: MergedTOCEntry[][]
 ): Promise<PDFDocument> {
-  if (!toc || toc.length === 0) return mergedPdfDoc;
+  // Nothing to do
+  if (!tocdata || tocdata.length === 0) {
+    return mergedPdfDoc;
+  }
 
-  // --- Get page refs (flat list) ---
   const pages = mergedPdfDoc.getPages();
   const pageRefs = pages.map((p) => p.ref);
 
   const { context, catalog } = mergedPdfDoc;
 
-  // Convert flat list into tree structure
-  type TOCNode = TOCItem & { children: TOCNode[] };
-  const root: TOCNode = { title: '__ROOT__', page: -1, level: 0, children: [] };
-  const stack: TOCNode[] = [root];
+  type OutlineNode = {
+    title: string;
+    pageIndex: number;   // 0-based index into pageRefs[]
+    level: number;       // hierarchy level, 1 = top-level
+    children: OutlineNode[];
+  };
 
-  toc.forEach((item) => {
-    const node: TOCNode = { ...item, children: [] };
-    // Pop until we find the parent level
-    while (stack.length > 0 && stack[stack.length - 1].level >= item.level) {
-      stack.pop();
+  // Global root of the outline tree
+  const globalRoot: OutlineNode = {
+    title: '__ROOT__',
+    pageIndex: -1,
+    level: 0,
+    children: [],
+  };
+
+  // Build a small tree for each book (group) and append to the global root.
+  for (const group of tocdata) {
+    if (!group || group.length === 0) continue;
+
+    const groupRoot: OutlineNode = {
+      title: '__GROUP_ROOT__',
+      pageIndex: -1,
+      level: 0,
+      children: [],
+    };
+
+    const stack: OutlineNode[] = [groupRoot];
+
+    for (const [pdfPage, _bookPage, label, rawLevel] of group) {
+      if (pdfPage == null) continue;
+
+      // Convert global 1-based PDF page number to 0-based index
+      const pageIndex = pdfPage - 1;
+      if (pageIndex < 0 || pageIndex >= pageRefs.length) {
+        // Out-of-range – skip this entry
+        continue;
+      }
+
+      let level = Number(rawLevel);
+      if (!Number.isFinite(level) || level < 1) level = 1;
+
+      const node: OutlineNode = {
+        title: (label ?? '').trim(),
+        pageIndex,
+        level,
+        children: [],
+      };
+
+      // Pop stack until the top has a smaller level than the new node
+      while (stack.length > 0 && stack[stack.length - 1].level >= node.level) {
+        stack.pop();
+      }
+
+      const parent = stack[stack.length - 1] ?? groupRoot;
+      parent.children.push(node);
+      stack.push(node);
     }
-    stack[stack.length - 1].children.push(node);
-    stack.push(node);
-  });
 
-  // Recursive builder for outline items
+    if (groupRoot.children.length > 0) {
+      globalRoot.children.push(...groupRoot.children);
+    }
+  }
+
+  // If nothing valid ended up in the tree, leave the PDF as-is.
+  if (globalRoot.children.length === 0) {
+    return mergedPdfDoc;
+  }
+
+  // Recursive builder, adapted from mergeWithOutlines
   function buildOutlineTree(
-    nodes: TOCNode[],
+    nodes: OutlineNode[],
     parentRef: PDFRef
   ): { firstRef: PDFRef | null; lastRef: PDFRef | null; count: number } {
-    if (nodes.length === 0) return { firstRef: null, lastRef: null, count: 0 };
+    if (!nodes || nodes.length === 0) {
+      return { firstRef: null, lastRef: null, count: 0 };
+    }
 
     let firstRef: PDFRef | null = null;
     let lastRef: PDFRef | null = null;
     let prevRef: PDFRef | null = null;
     let totalCount = 0;
 
-    nodes.forEach((node, index) => {
+    nodes.forEach((node) => {
+      const pageRef = pageRefs[node.pageIndex];
+      if (!pageRef) {
+        // If the page index is somehow invalid, skip this node (and its subtree)
+        return;
+      }
+
       const thisRef = context.nextRef();
       if (!firstRef) firstRef = thisRef;
       lastRef = thisRef;
 
-      // Destination array for this outline item
       const destArray = context.obj([
-        pageRefs[node.page],
+        pageRef,
         PDFName.of('XYZ'),
         PDFNull,
         PDFNull,
         PDFNull,
       ]);
 
-      // Recursively create children
-      const { firstRef: childFirst, lastRef: childLast, count: childCount } =
-        buildOutlineTree(node.children, thisRef);
+      const {
+        firstRef: childFirst,
+        lastRef: childLast,
+        count: childCount,
+      } = buildOutlineTree(node.children, thisRef);
 
-      const outlineDictEntries: any = {
+      const outlineDictEntries: Record<string, any> = {
         Title: PDFString.of(node.title),
         Parent: parentRef,
         Dest: destArray,
       };
 
-      if (prevRef) outlineDictEntries.Prev = prevRef;
-      if (index < nodes.length - 1) {
-        // Next will be set in the NEXT loop item
+      if (prevRef) {
+        outlineDictEntries.Prev = prevRef;
       }
       if (childCount > 0) {
         outlineDictEntries.First = childFirst;
@@ -1052,25 +1126,30 @@ export async function mergeWithOutlines(
         outlineDictEntries.Count = PDFNumber.of(childCount);
       }
 
-      // Assign this item now (Next will be set in previous node’s dict)
       context.assign(thisRef, context.obj(outlineDictEntries));
 
-      // Set the Next pointer for the previous node if applicable
       if (prevRef) {
         const prevDict = context.lookup(prevRef, PDFDict);
         prevDict.set(PDFName.of('Next'), thisRef);
       }
 
       prevRef = thisRef;
-      totalCount += 1 + childCount; // Include children in total
+      totalCount += 1 + childCount;
     });
 
     return { firstRef, lastRef, count: totalCount };
   }
 
-  // Create the root outlines dictionary
   const outlinesDictRef = context.nextRef();
-  const { firstRef, lastRef, count } = buildOutlineTree(root.children, outlinesDictRef);
+  const { firstRef, lastRef, count } = buildOutlineTree(
+    globalRoot.children,
+    outlinesDictRef
+  );
+
+  if (!firstRef || !lastRef || count === 0) {
+    // Nothing meaningful was built, don't touch the catalog
+    return mergedPdfDoc;
+  }
 
   const outlinesDict = context.obj({
     Type: PDFName.of('Outlines'),
@@ -1080,8 +1159,6 @@ export async function mergeWithOutlines(
   });
 
   context.assign(outlinesDictRef, outlinesDict);
-
-  // Attach to catalog
   catalog.set(PDFName.of('Outlines'), outlinesDictRef);
 
   return mergedPdfDoc;

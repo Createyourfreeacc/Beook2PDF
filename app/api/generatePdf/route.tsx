@@ -646,7 +646,7 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
     }
 
     // Sort each book’s TOC entries by book page, then by ZORDER
-    const result: MergedTOCEntry[][] = tempResult.map((bookEntries) => {
+    const result: MergedTOCEntry[][] = tempResult.map((bookEntries, bookIdx) => {
       bookEntries.sort((a, b) => {
         if (a.bookPage !== b.bookPage) return a.bookPage - b.bookPage;
         if (a.order !== b.order) return a.order - b.order;
@@ -671,6 +671,44 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
 
         if (samePage && (firstHasHigherOrder || sameOrderFirstDeeper)) {
           bookEntries.shift();
+        }
+      }
+
+      // INSERT BOOK TITLE AS TOP-LEVEL ENTRY + SHIFT LEVELS
+      if (bookEntries.length > 0) {
+        const first = bookEntries[0];
+
+        // Titel can be string, string[], or something else -> normalise
+        const rawTitle = (toggledBooks[bookIdx] as any)?.Titel;
+
+        let bookTitle = '';
+        if (Array.isArray(rawTitle)) {
+          // take first entry if it's an array
+          bookTitle = String(rawTitle[0] ?? '');
+        } else if (typeof rawTitle === 'string') {
+          bookTitle = rawTitle;
+        } else if (rawTitle != null) {
+          // fallback for odd cases (number, etc.)
+          bookTitle = String(rawTitle);
+        }
+
+        bookTitle = bookTitle.trim();
+
+        if (bookTitle.length > 0) {
+          // Raise the level of all existing entries by +1
+          for (const e of bookEntries) {
+            e.level = e.level + 1;
+          }
+
+          // Insert the book title as the very first entry
+          bookEntries.unshift({
+            pdfPage: first.pdfPage,
+            bookPage: first.bookPage,
+            label: bookTitle,
+            level: 1,
+            // order is not used after this point, 0 keeps it at the top if re-sorted
+            order: 0,
+          });
         }
       }
 
@@ -988,7 +1026,6 @@ export async function getTOCData(): Promise<TOCData[]> {
   }
 }
 
-// TODO: Show the Book Title as top most overview element (collapse its content)
 // BUG: Outline doesn't work on firefox. Warning: Unable to read document outline.
 export async function addOutlineToPdf(
   mergedPdfDoc: PDFDocument,

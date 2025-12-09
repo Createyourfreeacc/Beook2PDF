@@ -1053,6 +1053,9 @@ export async function getTOCData(): Promise<TOCData[]> {
 
 // TODO: Ordering is borked Bug: FACH 062 PPL FUNKNAVIGATION (RADIONAVIGATION) overview sometimes trims entire 6th chapter and
 //      Angang is not always first as compared to Seite (95)
+//      overview item is probably not trimmed but part of the wrong toc item. The entire 6th chapter is inside Anhang or Seite (75)
+//      this points to an ordering bug but since the beook app gets its top level toc item from somewhere else than (Bug:) ZILPTOPICPRODUCT
+//      this is complicated further.
 export async function addOutlineToPdf(
   mergedPdfDoc: PDFDocument,
   tocdata: MergedTOCEntry[][]

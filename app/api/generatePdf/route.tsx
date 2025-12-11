@@ -50,6 +50,12 @@ type Book = {
   Toggled: boolean;
 };
 
+interface ExportOptions {
+  generateTocPages: boolean;
+  exportQuiz: boolean;
+  exportMyQuiz: boolean;
+}
+
 interface TOCData {
   zpk: number;
   title: string;
@@ -86,11 +92,25 @@ export async function GET(request: NextRequest) {
   const jobId = searchParams.get('jobId') || 'default';
   const booksParam = searchParams.get('books');
 
+  const generateTocPagesParam = searchParams.get('generateTocPages');
+  const exportQuizParam = searchParams.get('exportQuiz');
+  const exportMyQuizParam = searchParams.get('exportMyQuiz');
+
   if (!booksParam) {
     return NextResponse.json({ error: 'Missing ID parameter' }, { status: 400 });
   }
 
   const books: Book[] = JSON.parse(booksParam);
+
+  const exportOptions: ExportOptions = {
+    // default: true if param missing
+    generateTocPages:
+      generateTocPagesParam === null ? true : generateTocPagesParam === 'true',
+    exportQuiz:
+      exportQuizParam === null ? true : exportQuizParam === 'true',
+    // default: false if param missing
+    exportMyQuiz: exportMyQuizParam === 'true',
+  };
 
   try {
     const allData: Record<string, any> = {};
@@ -137,7 +157,7 @@ export async function GET(request: NextRequest) {
 
     setPhaseProgress(jobId, 'convert', 0);
     await new Promise(res => setImmediate(res))
-    const mergedPdfBytes = await generateMergedPdf(books, htmlPages, jobId);
+    const mergedPdfBytes = await generateMergedPdf(books, htmlPages, jobId, exportOptions);
 
     setPhaseProgress(jobId, 'finalize', 1);
     await new Promise(res => setImmediate(res))
@@ -398,8 +418,14 @@ export async function modifyContent(books: Book[], dataMap: Record<string, { Z_P
   return htmlPages;
 }
 
-export async function generateMergedPdf(books: Book[], htmlPages: string[], jobId: string): Promise<Uint8Array> {
+export async function generateMergedPdf(
+  books: Book[],
+  htmlPages: string[],
+  jobId: string,
+  exportOptions: ExportOptions
+): Promise<Uint8Array> {
   const pageCount = htmlPages.length;
+  const { generateTocPages } = exportOptions;
 
   if (!Array.isArray(htmlPages) || pageCount === 0) {
     throw new Error('Missing HTML pages');
@@ -510,12 +536,22 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
   const entries = await getTOCData();
   const tocData = mergeTOCData(books, entries, pageNum);
 
-  const { pdfDocWithToc, updatedTocData } = await insertTocPagesForBooks(
-    mergedPdfDoc,
-    books,
-    tocData,
-    pageNum
-  );
+  let pdfDocWithToc;
+  let updatedTocData;
+  if (generateTocPages) {
+    const result = await insertTocPagesForBooks(
+      mergedPdfDoc,
+      books,
+      tocData,
+      pageNum
+    );
+
+    pdfDocWithToc = result.pdfDocWithToc;
+    updatedTocData = result.updatedTocData;
+  } else {
+    pdfDocWithToc = mergedPdfDoc;
+    updatedTocData = tocData;
+  }
 
   const PdfDoc = await addOutlineToPdf(pdfDocWithToc, updatedTocData);
 

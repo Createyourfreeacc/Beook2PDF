@@ -74,6 +74,11 @@ export default function BookReader() {
     const [books, setBooks] = useState<Book[]>([]);
     const [orderBarItems, setOrderBarItems] = useState<{ id: string; content: JSX.Element }[]>([]); // TODO: maybe remove, books already beeing reordered, only here for img
     const [downloadError, setDownloadError] = useState(false);
+
+    const [generateTocPages, setGenerateTocPages] = useState(true);
+    const [exportQuiz, setExportQuiz] = useState(true);
+    const [exportMyQuiz, setExportMyQuiz] = useState(false);
+
     const allBooksToggled = orderBarItems.length > 0 && orderBarItems.every(item => books.find(b => b.BookID === item.id)?.Toggled);
     const someBooksToggled = orderBarItems.some(item => books.find(b => b.BookID === item.id)?.Toggled);
 
@@ -410,7 +415,10 @@ export default function BookReader() {
             setProgressClient(0);
             setIsProgressVisible(true);
 
-            const responsepdf = await fetch(`/api/generatePdf?jobId=${jobId}&books=${encodeURIComponent(JSON.stringify(books))}`);
+            const responsepdf = await fetch(
+                `/api/generatePdf?jobId=${jobId}&books=${encodeURIComponent(JSON.stringify(books))}` +
+                `&generateTocPages=${generateTocPages}&exportQuiz=${exportQuiz}&exportMyQuiz=${exportMyQuiz}`
+            );
             if (!responsepdf.ok) throw new Error('Failed to generate PDF');
 
             const blob = await responsepdf.blob();
@@ -432,14 +440,46 @@ export default function BookReader() {
     return (
         <div>
             <div className="flex justify-center space-x-4 mb-4">
-                <div className="flex items-center gap-3">
-                    <Checkbox
-                        id="books"
-                        checked={allBooksToggled}
-                        onCheckedChange={(checked) => toggleAllBooks(!!checked)}
-                        {...(!allBooksToggled && someBooksToggled ? { indeterminate: "true" } : {})}
-                    />
-                    <Label htmlFor="books">Enable all books for download</Label>
+                {/* Left side: book toggle + export option toggles */}
+                <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-3">
+                        <Checkbox
+                            id="books"
+                            checked={allBooksToggled}
+                            onCheckedChange={(checked) => toggleAllBooks(!!checked)}
+                            {...(!allBooksToggled && someBooksToggled ? { indeterminate: "true" } : {})}
+                        />
+                        <Label htmlFor="books">Enable all books for download</Label>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-2">
+                            <Checkbox
+                                id="generateTocPages"
+                                checked={generateTocPages}
+                                onCheckedChange={(checked) => setGenerateTocPages(!!checked)}
+                            />
+                            <Label htmlFor="generateTocPages">Generate table of contents pages</Label>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <Checkbox
+                                id="exportQuiz"
+                                checked={exportQuiz}
+                                onCheckedChange={(checked) => setExportQuiz(!!checked)}
+                            />
+                            <Label htmlFor="exportQuiz">Export quiz</Label>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <Checkbox
+                                id="exportMyQuiz"
+                                checked={exportMyQuiz}
+                                onCheckedChange={(checked) => setExportMyQuiz(!!checked)}
+                            />
+                            <Label htmlFor="exportMyQuiz">Export my quiz</Label>
+                        </div>
+                    </div>
                 </div>
                 <div className="w-full flex items-center justify-center gap-3">
                     {isProgressVisible && <><Progress

@@ -692,7 +692,6 @@ export async function getTOCData(): Promise<TOCData[]> {
   }
 }
 
-// TODO: make toc clickable in pdf
 async function insertTocPagesForBooks(
   mergedPdfDoc: PDFDocument,
   books: Book[],
@@ -716,6 +715,20 @@ async function insertTocPagesForBooks(
       level,
     ] as MergedTOCEntry)
   );
+
+  const { context } = mergedPdfDoc;
+
+  type TocLinkJob = {
+    bookIdx: number;
+    entryIdx: number;        // index into updatedTocData[bookIdx]
+    tocPageIndex: number;    // 1-based global page index of the TOC page
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  };
+
+  const tocLinkJobs: TocLinkJob[] = [];
 
   const MAX_LINES_PER_PAGE = 50;
   const TITLE_FONT_SIZE = 14;
@@ -798,14 +811,23 @@ async function insertTocPagesForBooks(
     // - assume first item is the book title -> skip it
     // - shift all remaining levels down by 1 (clamped to >= 1)
     // - this does NOT modify bookTocEntries / updatedTocData
-    let pageTocEntries: MergedTOCEntry[] = [];
+    type PageTocEntry = {
+      bookEntryIndex: number;   // index into updatedTocData[bookIdx]
+      entry: MergedTOCEntry;    // [pdfPage, bookPage, label, levelForLayout]
+    };
+
+    let pageTocEntries: PageTocEntry[] = [];
     if (bookTocEntries && bookTocEntries.length > 0) {
       for (let i = 1; i < bookTocEntries.length; i++) {
         const [pdfPage, bookPage, label, level] = bookTocEntries[i];
         const currentLevel =
           typeof level === 'number' && Number.isFinite(level) ? level : 1;
         const newLevel = Math.max(1, currentLevel - 1);
-        pageTocEntries.push([pdfPage, bookPage, label, newLevel]);
+
+        pageTocEntries.push({
+          bookEntryIndex: i,
+          entry: [pdfPage, bookPage, label, newLevel],
+        });
       }
     }
 
@@ -896,13 +918,18 @@ async function insertTocPagesForBooks(
     }
 
     // Paginate this book's TOC entries for the *page TOC* (no book title, levels shifted)
-    type PagedEntry = { entry: MergedTOCEntry; lines: string[] };
+    type PagedEntry = {
+      bookEntryIndex: number;
+      entry: MergedTOCEntry;
+      lines: string[];
+    };
 
     const paginatedEntries: PagedEntry[][] = [];
     let currentPage: PagedEntry[] = [];
     let currentLineCount = 0;
 
-    for (const entry of pageTocEntries) {
+    for (const pageEntry of pageTocEntries) {
+      const { entry, bookEntryIndex } = pageEntry;
       const [_, __, label, level] = entry;
       const safeLevel = level && level > 0 ? level : 1;
       const indent = (safeLevel - 1) * 16;
@@ -910,7 +937,12 @@ async function insertTocPagesForBooks(
       const entryFont = safeLevel === 1 ? tocLevel1Font : tocFont;
 
       const maxTextWidth = A4_WIDTH - MARGIN_RIGHT - textX - 32;
-      const wrappedLines = wrapText(label || '', maxTextWidth, entryFont, ENTRY_FONT_SIZE);
+      const wrappedLines = wrapText(
+        label || '',
+        maxTextWidth,
+        entryFont,
+        ENTRY_FONT_SIZE
+      );
       const neededLines = wrappedLines.length;
 
       if (currentLineCount + neededLines > MAX_LINES_PER_PAGE) {
@@ -921,7 +953,7 @@ async function insertTocPagesForBooks(
         currentLineCount = 0;
       }
 
-      currentPage.push({ entry, lines: wrappedLines });
+      currentPage.push({ bookEntryIndex, entry, lines: wrappedLines });
       currentLineCount += neededLines;
     }
 
@@ -997,7 +1029,7 @@ async function insertTocPagesForBooks(
       }
 
       // Draw each TOC entry with wrapped lines, respecting MAX_LINES_PER_PAGE
-      for (const { entry, lines } of entriesForPage) {
+      for (const { entry, lines, bookEntryIndex } of entriesForPage) {
         const [_, bookPage, _label, level] = entry;
 
         if (y < 72) {
@@ -1011,10 +1043,15 @@ async function insertTocPagesForBooks(
 
         const entryFont = safeLevel === 1 ? tocLevel1Font : tocFont;
 
+        let firstLineY: number | null = null;
         let lastLineY: number | null = null;
 
         for (const line of lines) {
           if (y < 72) break;
+
+          if (firstLineY === null) {
+            firstLineY = y;
+          }
 
           page.drawText(line, {
             x: textX,
@@ -1042,6 +1079,24 @@ async function insertTocPagesForBooks(
             color: rgb(0, 0, 0),
           });
         }
+
+        // Register link area for this TOC line (whole line clickable)
+        if (firstLineY != null && lastLineY != null) {
+          const x1 = MARGIN_LEFT;
+          const x2 = A4_WIDTH - MARGIN_RIGHT;
+          const yTop = firstLineY + ENTRY_FONT_SIZE + 2;
+          const yBottom = lastLineY - 2;
+
+          tocLinkJobs.push({
+            bookIdx,
+            entryIdx: bookEntryIndex,
+            tocPageIndex: insertBeforePdfPage + pageIdx, // 1-based global page number
+            x1,
+            y1: Math.max(Math.min(yBottom, yTop), 0),
+            y2: Math.min(Math.max(yBottom, yTop), A4_HEIGHT),
+            x2,
+          });
+        }
       }
 
       insertIndex++;
@@ -1056,6 +1111,49 @@ async function insertTocPagesForBooks(
 
     // All subsequent books' pages are shifted by the number of pages we inserted
     globalOffset += pagesInserted;
+  }
+
+  // After inserting all TOC pages and updating updatedTocData,
+  // create clickable link annotations for each TOC entry.
+  const pages = mergedPdfDoc.getPages();
+
+  for (const job of tocLinkJobs) {
+    const bookEntries = updatedTocData[job.bookIdx];
+    if (!bookEntries) continue;
+
+    const targetEntry = bookEntries[job.entryIdx];
+    if (!targetEntry) continue;
+
+    const targetPdfPageNum = Number(targetEntry[0]);
+    if (
+      !Number.isFinite(targetPdfPageNum) ||
+      targetPdfPageNum < 1 ||
+      targetPdfPageNum > pages.length
+    ) {
+      continue;
+    }
+
+    const tocPage = pages[job.tocPageIndex - 1];
+    const targetPage = pages[targetPdfPageNum - 1];
+    if (!tocPage || !targetPage) continue;
+
+    let annots = tocPage.node.lookup(PDFName.of('Annots'), PDFArray);
+    if (!annots) {
+      annots = context.obj([]) as PDFArray;
+      tocPage.node.set(PDFName.of('Annots'), annots);
+    }
+
+    const linkRef = context.register(
+      context.obj({
+        Type: PDFName.of('Annot'),
+        Subtype: PDFName.of('Link'),
+        Rect: [job.x1, job.y1, job.x2, job.y2],
+        Border: [0, 0, 0],
+        Dest: [targetPage.ref, 'XYZ', null, null, null],
+      })
+    );
+
+    annots.push(linkRef);
   }
 
   return { pdfDocWithToc: mergedPdfDoc, updatedTocData };

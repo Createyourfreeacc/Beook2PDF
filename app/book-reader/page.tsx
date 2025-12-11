@@ -440,52 +440,6 @@ export default function BookReader() {
     return (
         <div>
             <div className="flex justify-center space-x-4 mb-4">
-                <div className="flex flex-col gap-2">
-                    <div className="flex items-center gap-3">
-                        <Checkbox
-                            id="books"
-                            checked={allBooksToggled}
-                            onCheckedChange={(checked) => toggleAllBooks(!!checked)}
-                            {...(!allBooksToggled && someBooksToggled ? { indeterminate: "true" } : {})}
-                        />
-                        <Label htmlFor="books">Enable all books for download</Label>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                        <div className="flex items-center gap-2">
-                            <Checkbox
-                                id="generateTocPages"
-                                checked={generateTocPages}
-                                onCheckedChange={(checked) => setGenerateTocPages(!!checked)}
-                            />
-                            <Label htmlFor="generateTocPages">Generate table of contents pages</Label>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                            <Checkbox
-                                id="exportQuiz"
-                                checked={exportQuiz}
-                                onCheckedChange={(checked) => setExportQuiz(!!checked)}
-                            />
-                            <Label htmlFor="exportQuiz">Export quiz</Label>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                            <Checkbox
-                                id="exportMyQuiz"
-                                checked={exportMyQuiz}
-                                onCheckedChange={(checked) => setExportMyQuiz(!!checked)}
-                            />
-                            <Label htmlFor="exportMyQuiz">Export my quiz</Label>
-                        </div>
-                    </div>
-                </div>
-                <div className="w-full flex items-center justify-center gap-3">
-                    {isProgressVisible && <><Progress
-                        value={progressClient}
-                        className="transition duration-700 ease-in-out ..." /><span className="text-sm">{progressClient}%</span></>
-                    }
-                </div>
                 <Button
                     variant="outline"
                     onClick={() => generatePDF()}
@@ -494,6 +448,12 @@ export default function BookReader() {
                 >
                     <ArrowBigDownDash></ArrowBigDownDash>Download
                 </Button>
+                <div className="w-full flex items-center justify-center gap-3">
+                    {isProgressVisible && <><Progress
+                        value={progressClient}
+                        className="transition duration-700 ease-in-out ..." /><span className="text-sm">{progressClient}%</span></>
+                    }
+                </div>
                 <Select>
                     <SelectTrigger className="w-[180px]">
                         <SelectValue placeholder="Select a Profile" />
@@ -523,54 +483,96 @@ export default function BookReader() {
                 </Button>
             </div>
             <div className="flex flex-row w-full">
-                <div className="inline-block">
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <OrderBar
-                                items={orderBarItems.map(item => ({
-                                    ...item,
-                                    toggled: books.find(b => b.BookID === item.id)?.Toggled || false
-                                }))}
-                                onToggle={toggleSingleBook}
-                                onReorder={(newOrder) => {
-                                    // Reorder books array based on the new order of items
-                                    const reorderedBooks = newOrder.map(item =>
-                                        books.find(book => book.BookID === item.id)
-                                    ).filter(Boolean) as Book[];
-
-                                    // Add any books that might not be in the order bar
-                                    const booksNotInOrderBar = books.filter(book =>
-                                        !newOrder.some(item => item.id === book.BookID)
-                                    );
-
-                                    setBooks([...reorderedBooks, ...booksNotInOrderBar]);
-                                    setOrderBarItems(newOrder);
-                                }}
-                                highlightError={downloadError}
+                <div className="flex flex-col flex-1 gap-4">
+                    <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-3">
+                            <Checkbox
+                                id="books"
+                                checked={allBooksToggled}
+                                onCheckedChange={(checked) => toggleAllBooks(!!checked)}
+                                {...(!allBooksToggled && someBooksToggled ? { indeterminate: "true" } : {})}
                             />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                            <p>Enable & Order</p>
-                        </TooltipContent>
-                    </Tooltip>
-                </div>
-                <div className="w-1"></div>
-                <div className="flex flex-col flex-1 h-full">
-                    {/* TODO: BUG: TocBar doesn't update properly the first time (is shown for 1 sec and then disappears, when site updates
-                                   for example because of a download start, it showns properly )*/}
-                    <TocBar
-                        items={orderBarItems.map(item => {
-                            const tocEntry = tocHtml.find(t => t.id === item.id);
+                            <Label htmlFor="books">Enable all books for download</Label>
+                        </div>
 
-                            return {
-                                ...item,
-                                content: tocEntry?.content || <div>No TOC available</div>,
-                                /* TODO: READ LANGUAGE OF BOOK AN CHANGE TITLE ACCRODINGLY*/
-                                toggled: books.find(b => b.BookID === item.id)?.Toggled || false
-                            };
-                        })}
-                        onToggle={toggleSingleBook}
-                    />
+                        <div className="flex items-center gap-2">
+                            <Checkbox
+                                id="generateTocPages"
+                                checked={generateTocPages}
+                                onCheckedChange={(checked) => setGenerateTocPages(!!checked)}
+                            />
+                            <Label htmlFor="generateTocPages">Generate table of contents pages</Label>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <Checkbox
+                                id="exportQuiz"
+                                checked={exportQuiz}
+                                onCheckedChange={(checked) => setExportQuiz(!!checked)}
+                            />
+                            <Label htmlFor="exportQuiz">Export quiz</Label>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <Checkbox
+                                id="exportMyQuiz"
+                                checked={exportMyQuiz}
+                                onCheckedChange={(checked) => setExportMyQuiz(!!checked)}
+                            />
+                            <Label htmlFor="exportMyQuiz">Export my quiz</Label>
+                        </div>
+                    </div>
+                    <div className="flex flex-row gap-2">
+                        <div className="inline-block">
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <OrderBar
+                                        items={orderBarItems.map(item => ({
+                                            ...item,
+                                            toggled: books.find(b => b.BookID === item.id)?.Toggled || false
+                                        }))}
+                                        onToggle={toggleSingleBook}
+                                        onReorder={(newOrder) => {
+                                            // Reorder books array based on the new order of items
+                                            const reorderedBooks = newOrder.map(item =>
+                                                books.find(book => book.BookID === item.id)
+                                            ).filter(Boolean) as Book[];
+
+                                            // Add any books that might not be in the order bar
+                                            const booksNotInOrderBar = books.filter(book =>
+                                                !newOrder.some(item => item.id === book.BookID)
+                                            );
+
+                                            setBooks([...reorderedBooks, ...booksNotInOrderBar]);
+                                            setOrderBarItems(newOrder);
+                                        }}
+                                        highlightError={downloadError}
+                                    />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>Enable & Order</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        </div>
+
+                        <div className="flex flex-col flex-1 h-full">
+                            {/* TODO: BUG: TocBar doesn't update properly the first time (is shown for 1 sec and then disappears, when site updates
+                               for example because of a download start, it showns properly )*/}
+                            <TocBar
+                                items={orderBarItems.map(item => {
+                                    const tocEntry = tocHtml.find(t => t.id === item.id);
+
+                                    return {
+                                        ...item,
+                                        content: tocEntry?.content || <div>No TOC available</div>,
+                                        /* TODO: READ LANGUAGE OF BOOK AN CHANGE TITLE ACCRODINGLY*/
+                                        toggled: books.find(b => b.BookID === item.id)?.Toggled || false
+                                    };
+                                })}
+                                onToggle={toggleSingleBook}
+                            />
+                        </div>
+                    </div>
                 </div>
                 <div className="w-1"></div>
                 <iframe

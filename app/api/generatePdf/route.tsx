@@ -694,7 +694,6 @@ export async function getTOCData(): Promise<TOCData[]> {
 
 // TODO: make toc clickable in pdf
 // TODO: toc items can only be 1 line even if long
-// TODO: for pages dont have title in toc and make bottom level chapter bold
 async function insertTocPagesForBooks(
   mergedPdfDoc: PDFDocument,
   books: Book[],
@@ -729,6 +728,7 @@ async function insertTocPagesForBooks(
 
   const tocFont = await mergedPdfDoc.embedFont(StandardFonts.Helvetica);
   const tocTitleFont = await mergedPdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const tocLevel1Font = tocTitleFont;
 
   type TocGap = { startBookPage: number; length: number };
 
@@ -739,6 +739,21 @@ async function insertTocPagesForBooks(
     const book = toggledBooks[bookIdx];
     const bookPageMappings = pageNum[bookIdx];
     const bookTocEntries = updatedTocData[bookIdx];
+
+    // Build a *view-only* TOC for the page TOC:
+    // - assume first item is the book title -> skip it
+    // - shift all remaining levels down by 1 (clamped to >= 1)
+    // - this does NOT modify bookTocEntries / updatedTocData
+    let pageTocEntries: MergedTOCEntry[] = [];
+    if (bookTocEntries && bookTocEntries.length > 0) {
+      for (let i = 1; i < bookTocEntries.length; i++) {
+        const [pdfPage, bookPage, label, level] = bookTocEntries[i];
+        const currentLevel =
+          typeof level === 'number' && Number.isFinite(level) ? level : 1;
+        const newLevel = Math.max(1, currentLevel - 1);
+        pageTocEntries.push([pdfPage, bookPage, label, newLevel]);
+      }
+    }
 
     if (!bookPageMappings || bookPageMappings.length === 0 || !bookTocEntries) {
       continue;
@@ -763,7 +778,7 @@ async function insertTocPagesForBooks(
       continue;
     }
 
-    if (bookTocEntries.length === 0) {
+    if (!pageTocEntries || pageTocEntries.length === 0) {
       continue;
     }
 
@@ -826,10 +841,10 @@ async function insertTocPagesForBooks(
       insertBeforePdfPage = lastBookPdfPage + 1;
     }
 
-    // Paginate this book's TOC entries
+    // Paginate this book's TOC entries for the *page TOC* (no book title, levels shifted)
     const paginatedEntries: MergedTOCEntry[][] = [];
-    for (let i = 0; i < bookTocEntries.length; i += MAX_LINES_PER_PAGE) {
-      paginatedEntries.push(bookTocEntries.slice(i, i + MAX_LINES_PER_PAGE));
+    for (let i = 0; i < pageTocEntries.length; i += MAX_LINES_PER_PAGE) {
+      paginatedEntries.push(pageTocEntries.slice(i, i + MAX_LINES_PER_PAGE));
     }
 
     const pagesInserted = paginatedEntries.length;
@@ -888,7 +903,7 @@ async function insertTocPagesForBooks(
               : "Inhaltsverzeichnis";
             break;
         }
-        
+
         page.drawText(tocTitle, {
           x: MARGIN_LEFT,
           y,
@@ -910,9 +925,12 @@ async function insertTocPagesForBooks(
         const indent = (safeLevel - 1) * 16;
         const textX = MARGIN_LEFT + indent;
 
+        // level 1 entries should be bold
+        const entryFont = safeLevel === 1 ? tocLevel1Font : tocFont;
+
         let displayLabel = label || '';
         const maxTextWidth = A4_WIDTH - MARGIN_RIGHT - textX - 32;
-        const labelWidth = tocFont.widthOfTextAtSize(displayLabel, ENTRY_FONT_SIZE);
+        const labelWidth = entryFont.widthOfTextAtSize(displayLabel, ENTRY_FONT_SIZE);
         if (labelWidth > maxTextWidth) {
           // approximate truncation
           const ratio = maxTextWidth / labelWidth;
@@ -924,7 +942,7 @@ async function insertTocPagesForBooks(
           x: textX,
           y,
           size: ENTRY_FONT_SIZE,
-          font: tocFont,
+          font: entryFont,
           color: rgb(0, 0, 0),
         });
 

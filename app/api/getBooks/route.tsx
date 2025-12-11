@@ -17,6 +17,7 @@ function findFolderContainingFile(rootDir: string, filename: string): string | n
     return null;
 }
 
+//TODO: actually fetch language from ZILPCOURSEDE ZLANGUAGECODE
 export async function GET(request: Request) {
     const TABLE_DEF = "ZILPCOURSEDEF";
     const TABLE_PRODUCT = "ZILPCOURSEPRODUCT";
@@ -36,7 +37,8 @@ export async function GET(request: Request) {
         const sql = `
             SELECT 
                 ${allDefCols.map(col => `D."${col}"`).join(', ')},
-                ${allProductCols.map(col => `P."${col}"`).join(', ')}
+                ${allProductCols.map(col => `P."${col}"`).join(', ')},
+                D."ZLANGUAGECODE" AS "ZLANG"
             FROM "${TABLE_DEF}" D
             LEFT JOIN "${TABLE_PRODUCT}" P
             ON D."ZREFERENCE" = P."ZCOURSEREFERENCE"
@@ -55,12 +57,15 @@ export async function GET(request: Request) {
                 Z_PK: key
             };
 
-            // === 1. Add basic course data ===
+            // Add basic course data
             COL_NAME_MAP.forEach(col => {
                 value[col] = row[col]?.toString() || '';
             });
 
-            // === 2. Extract folder from ZCOURSECONFIGFILEREFERENCE ===
+            // Add language code
+            value["ZLANG"] = row["ZLANG"]?.toString() || '';
+
+            // Extract folder from ZCOURSECONFIGFILEREFERENCE
             const configRefRaw = row["ZCOURSECONFIGFILEREFERENCE"];
             let folder = '';
             if (configRefRaw) {
@@ -72,7 +77,7 @@ export async function GET(request: Request) {
                 }
             }
 
-            // === 3. Process image fields ===
+            // Process image fields
             IMAGE_COLS.forEach(col => {
                 const rawFilename = row[col]?.toString() || '';
                 if (!rawFilename || !folder) {
@@ -114,7 +119,7 @@ export async function GET(request: Request) {
             resultList.push(value);
         });
 
-        // === 4. Get issue numbers for each course ===
+        // Get issue numbers for each course
         const sqlIssue = `
             SELECT "ZREFERENCE", "ZISSUEPRODUCT"
             FROM "ZILPISSUEDEF"
@@ -137,7 +142,7 @@ export async function GET(request: Request) {
             }
         });
 
-        // === 5. Get titles for each course ===
+        // Get titles for each course
         //TODO: BUG: Title has potentially the wrong language, problem lies with Beook but is not a reliable source of data.
         const sqlTitle = `
             SELECT "ZCOURSEIDENTIFIER", "ZTITLE"
@@ -161,7 +166,7 @@ export async function GET(request: Request) {
             }
         });
 
-        // === 6. Transform data to match frontend Book type ===
+        // Transform data to match frontend Book type
         const transformedResultList: any[] = [];
         const transformedImgResultList: any[] = [];
 
@@ -189,7 +194,8 @@ export async function GET(request: Request) {
                 Refrence: reference,                    // 978-3-905036-95-4
                 ProductNumber: courseProductNumber,     // 40       TODO: ADD BUT FOR WHAT
                 Issue: issueNumbers,                    // [[10, PPL020A00, Vorwort], [11, PPL020A01, 1 Einteilung der Luftfahrzeuge], [12, PPL020A02, 2 Komponenten eines Flugzeuges], [13, PPL020A03, 3 Flugzeugzelle (airfra...
-                                                        // TODO:rename to issues (everywhere (pain)) Should contain ZISSUEIDENTIFIER, ZISSUEPRODUCT and ZTITLE all from ZILPISSUEDEF (does not right now) order it like it is in ZORDER
+                // TODO:rename to issues (everywhere (pain)) Should contain ZISSUEIDENTIFIER, ZISSUEPRODUCT and ZTITLE all from ZILPISSUEDEF (does not right now) order it like it is in ZORDER
+                Lang: rawData["ZLANG"] || "",
                 Toggled: false,
             });
 

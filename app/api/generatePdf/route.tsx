@@ -31,6 +31,10 @@ import { getResolvedPaths } from '@/lib/config';
 
 const { dbPath: DB_PATH } = getResolvedPaths();
 
+// A4 size in PDF points (72 pt/inch)
+const A4_WIDTH = 595.28;
+const A4_HEIGHT = 841.89;
+
 // High-DPI A4-ish canvas (≈300 DPI)
 // 210mm x 297mm @ ~294 DPI -> ~2434 x 3445 px
 const PAGE_WIDTH_PX = 2434;
@@ -42,6 +46,7 @@ type Book = {
   CourseName: string;
   Refrence: string;
   Issue: number[];
+  Lang: string;
   Toggled: boolean;
 };
 
@@ -435,10 +440,6 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
   setPhaseProgress(jobId, 'convert', 1);
   const mergedPdfDoc = await PDFDocument.create();
 
-  // A4 size in PDF points (72 pt/inch)
-  const A4_WIDTH = 595.28;
-  const A4_HEIGHT = 841.89;
-
   // One printed page number (or null) per HTML page, in order
   const printedPageNumbers: (number | null)[] = htmlPages.map(getPageInfoNumber);
 
@@ -508,10 +509,15 @@ export async function generateMergedPdf(books: Book[], htmlPages: string[], jobI
   const pageNum = extractPageNumbers(htmlPages);
   const entries = await getTOCData();
   const tocData = mergeTOCData(books, entries, pageNum);
-  // TODO: do everything toc page related here
-  // 1. function that return the updated tocData and the pages in the correct form 
 
-  const PdfDoc = await addOutlineToPdf(mergedPdfDoc, tocData);
+  const { pdfDocWithToc, updatedTocData } = await insertTocPagesForBooks(
+    mergedPdfDoc,
+    books,
+    tocData,
+    pageNum
+  );
+
+  const PdfDoc = await addOutlineToPdf(pdfDocWithToc, updatedTocData);
 
   setPhaseProgress(jobId, 'merge', 1);
   return await PdfDoc.save();
@@ -684,6 +690,275 @@ export async function getTOCData(): Promise<TOCData[]> {
     console.error('Error fetching TOC data:', error);
     return [];
   }
+}
+
+// TODO: make toc clickable in pdf
+// TODO: toc items can only be 1 line even if long
+// TODO: for pages dont have title in toc and make bottom level chapter bold
+async function insertTocPagesForBooks(
+  mergedPdfDoc: PDFDocument,
+  books: Book[],
+  tocData: MergedTOCEntry[][],
+  pageNum: PageMapping[][]
+): Promise<{ pdfDocWithToc: PDFDocument; updatedTocData: MergedTOCEntry[][] }> {
+  // No TOC data -> nothing to insert
+  if (!tocData || tocData.length === 0) {
+    return { pdfDocWithToc: mergedPdfDoc, updatedTocData: tocData };
+  }
+
+  const toggledBooks = books.filter((b) => b.Toggled);
+  const groupCount = Math.min(toggledBooks.length, pageNum.length, tocData.length);
+
+  // Clone tocData so we can mutate safely
+  const updatedTocData: MergedTOCEntry[][] = tocData.map((bookEntries) =>
+    bookEntries.map(([pdfPage, bookPage, label, level]) => [
+      pdfPage,
+      bookPage,
+      label,
+      level,
+    ] as MergedTOCEntry)
+  );
+
+  const MAX_LINES_PER_PAGE = 50;
+  const TITLE_FONT_SIZE = 14;
+  const ENTRY_FONT_SIZE = 10;
+  const LINE_HEIGHT = 14;
+  const MARGIN_LEFT = 48;
+  const MARGIN_RIGHT = 48;
+  const MARGIN_TOP = 72;
+
+  const tocFont = await mergedPdfDoc.embedFont(StandardFonts.Helvetica);
+  const tocTitleFont = await mergedPdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  type TocGap = { startBookPage: number; length: number };
+
+  // how many pages we’ve already inserted before the current book
+  let globalOffset = 0;
+
+  for (let bookIdx = 0; bookIdx < groupCount; bookIdx++) {
+    const book = toggledBooks[bookIdx];
+    const bookPageMappings = pageNum[bookIdx];
+    const bookTocEntries = updatedTocData[bookIdx];
+
+    if (!bookPageMappings || bookPageMappings.length === 0 || !bookTocEntries) {
+      continue;
+    }
+
+    // Apply offset from TOC pages inserted for previous books
+    for (const entry of bookTocEntries) {
+      entry[0] += globalOffset;
+    }
+
+    // Determine the last printed page for this book
+    const printedPages = bookPageMappings
+      .map((m) => m[1])
+      .filter((p): p is number => p != null);
+
+    const lastPrintedPage = printedPages.length
+      ? Math.max(...printedPages)
+      : 0;
+
+    // Skip TOC page insertion if the book has fewer than 10 printed pages
+    if (lastPrintedPage < 10) {
+      continue;
+    }
+
+    if (bookTocEntries.length === 0) {
+      continue;
+    }
+
+    // Find gaps in printed page numbers within the first 10 printed pages
+    const presentFirstTen = new Set<number>();
+    for (const [pdfPage, bookPage] of bookPageMappings) {
+      if (bookPage != null && bookPage >= 1 && bookPage <= 10) {
+        presentFirstTen.add(bookPage);
+      }
+    }
+
+    const gaps: TocGap[] = [];
+    let inGap = false;
+    let gapStart = 0;
+
+    for (let p = 1; p <= 10; p++) {
+      const occupied = presentFirstTen.has(p);
+      if (!occupied && !inGap) {
+        inGap = true;
+        gapStart = p;
+      } else if (occupied && inGap) {
+        gaps.push({ startBookPage: gapStart, length: p - gapStart });
+        inGap = false;
+      }
+    }
+    if (inGap) {
+      gaps.push({ startBookPage: gapStart, length: 11 - gapStart });
+    }
+
+    // Map "printed book page" -> "current global pdf page" (1-based)
+    const bookPageToGlobalPdfPage = new Map<number, number>();
+    for (const [pdfPage, bookPage] of bookPageMappings) {
+      if (bookPage != null) {
+        bookPageToGlobalPdfPage.set(bookPage, pdfPage + globalOffset);
+      }
+    }
+
+    // Decide where to insert the TOC pages for this book
+    let insertBeforePdfPage: number | null = null;
+
+    if (gaps.length > 0) {
+      const firstGap = gaps[0];
+      const firstPageAfterGap = firstGap.startBookPage + firstGap.length;
+      const pdfAfterGap = bookPageToGlobalPdfPage.get(firstPageAfterGap);
+
+      if (pdfAfterGap != null) {
+        insertBeforePdfPage = pdfAfterGap;
+      }
+    }
+
+    if (insertBeforePdfPage == null) {
+      // Fallback: append TOC at the end of this book
+      let lastBookPdfPage = 0;
+      for (const [pdfPage] of bookPageMappings) {
+        const globalPdfPage = pdfPage + globalOffset;
+        if (globalPdfPage > lastBookPdfPage) {
+          lastBookPdfPage = globalPdfPage;
+        }
+      }
+      insertBeforePdfPage = lastBookPdfPage + 1;
+    }
+
+    // Paginate this book's TOC entries
+    const paginatedEntries: MergedTOCEntry[][] = [];
+    for (let i = 0; i < bookTocEntries.length; i += MAX_LINES_PER_PAGE) {
+      paginatedEntries.push(bookTocEntries.slice(i, i + MAX_LINES_PER_PAGE));
+    }
+
+    const pagesInserted = paginatedEntries.length;
+
+    // Insert the TOC pages into the PDF
+    let insertIndex = insertBeforePdfPage - 1; // pdf-lib pages are 0-based
+    for (let pageIdx = 0; pageIdx < paginatedEntries.length; pageIdx++) {
+      const entriesForPage = paginatedEntries[pageIdx];
+      const page = mergedPdfDoc.insertPage(insertIndex, [A4_WIDTH, A4_HEIGHT]);
+
+      let y = A4_HEIGHT - MARGIN_TOP;
+
+      // Draw title on first TOC page for the book
+      if (pageIdx === 0) {
+        const rawTitle = (book as any)?.Titel;
+        let bookTitle = '';
+        if (Array.isArray(rawTitle)) {
+          bookTitle = rawTitle.join(' ');
+        } else if (typeof rawTitle === 'string') {
+          bookTitle = rawTitle;
+        } else if (rawTitle != null) {
+          bookTitle = String(rawTitle);
+        }
+
+        // Language-dependent TOC title
+        let lang = (book as any)?.Lang;
+        if (typeof lang !== "string") lang = "DE";     // default if null/undefined
+        lang = lang.trim().toUpperCase();
+
+        let tocTitle = "";
+        switch (lang) {
+          case "EN":
+            tocTitle = bookTitle
+              ? `Table of Contents – ${bookTitle}`
+              : "Table of Contents";
+            break;
+          case "FR":
+            tocTitle = bookTitle
+              ? `Table des Matières – ${bookTitle}`
+              : "Table des Matières";
+            break;
+          case "ES":
+            tocTitle = bookTitle
+              ? `Índice – ${bookTitle}`
+              : "Índice";
+            break;
+          case "IT":
+            tocTitle = bookTitle
+              ? `Indice – ${bookTitle}`
+              : "Indice";
+            break;
+          case "DE":
+          default:
+            tocTitle = bookTitle
+              ? `Inhaltsverzeichnis – ${bookTitle}`
+              : "Inhaltsverzeichnis";
+            break;
+        }
+        
+        page.drawText(tocTitle, {
+          x: MARGIN_LEFT,
+          y,
+          size: TITLE_FONT_SIZE,
+          font: tocTitleFont,
+          color: rgb(0, 0, 0),
+        });
+        y -= TITLE_FONT_SIZE + 10;
+      }
+
+      // Draw each TOC line
+      for (const [_, bookPage, label, level] of entriesForPage) {
+        if (y < 72) {
+          // Safety check; in theory MAX_LINES_PER_PAGE should prevent this
+          break;
+        }
+
+        const safeLevel = level && level > 0 ? level : 1;
+        const indent = (safeLevel - 1) * 16;
+        const textX = MARGIN_LEFT + indent;
+
+        let displayLabel = label || '';
+        const maxTextWidth = A4_WIDTH - MARGIN_RIGHT - textX - 32;
+        const labelWidth = tocFont.widthOfTextAtSize(displayLabel, ENTRY_FONT_SIZE);
+        if (labelWidth > maxTextWidth) {
+          // approximate truncation
+          const ratio = maxTextWidth / labelWidth;
+          const approxChars = Math.max(4, Math.floor(displayLabel.length * ratio) - 3);
+          displayLabel = displayLabel.slice(0, approxChars) + '…';
+        }
+
+        page.drawText(displayLabel, {
+          x: textX,
+          y,
+          size: ENTRY_FONT_SIZE,
+          font: tocFont,
+          color: rgb(0, 0, 0),
+        });
+
+        if (bookPage != null) {
+          const pageText = String(bookPage);
+          const pageWidth = tocFont.widthOfTextAtSize(pageText, ENTRY_FONT_SIZE);
+          const pageX = A4_WIDTH - MARGIN_RIGHT - pageWidth;
+          page.drawText(pageText, {
+            x: pageX,
+            y,
+            size: ENTRY_FONT_SIZE,
+            font: tocFont,
+            color: rgb(0, 0, 0),
+          });
+        }
+
+        y -= LINE_HEIGHT;
+      }
+
+      insertIndex++;
+    }
+
+    // Shift this book's TOC entries for pages that come after the inserted block
+    for (const entry of bookTocEntries) {
+      if (entry[0] >= insertBeforePdfPage) {
+        entry[0] += pagesInserted;
+      }
+    }
+
+    // All subsequent books' pages are shifted by the number of pages we inserted
+    globalOffset += pagesInserted;
+  }
+
+  return { pdfDocWithToc: mergedPdfDoc, updatedTocData };
 }
 
 // TODO: Ordering is borked Bug: FACH 062 PPL FUNKNAVIGATION (RADIONAVIGATION) overview sometimes trims entire 6th chapter and
@@ -908,183 +1183,183 @@ function extractPageNumbers(htmlPages: string[]): PageMapping[][] {
   return result;
 }
 
-  function mergeTOCData(
-    books: Book[],
-    entries: TOCData[],
-    pageNum: PageMapping[][]
-  ): MergedTOCEntry[][] {
-    // Only books that are actually exported
-    const toggledBooks = books.filter((b) => b.Toggled);
+function mergeTOCData(
+  books: Book[],
+  entries: TOCData[],
+  pageNum: PageMapping[][]
+): MergedTOCEntry[][] {
+  // Only books that are actually exported
+  const toggledBooks = books.filter((b) => b.Toggled);
 
-    // pageNum groups are created in the same order as we looped over books in generatePdf
-    // (for each toggled book, in order), so index 0 in pageNum == first toggled book, etc.
-    const groupCount = Math.min(toggledBooks.length, pageNum.length);
+  // pageNum groups are created in the same order as we looped over books in generatePdf
+  // (for each toggled book, in order), so index 0 in pageNum == first toggled book, etc.
+  const groupCount = Math.min(toggledBooks.length, pageNum.length);
 
-    // Map each issue number (ZISSUE / ZISSUEPRODUCT) to the index of the book group
-    const issueToBookIndex = new Map<number, number>();
-    for (let i = 0; i < groupCount; i++) {
-      const book = toggledBooks[i];
-      for (const issue of book.Issue) {
-        issueToBookIndex.set(Number(issue), i);
-      }
+  // Map each issue number (ZISSUE / ZISSUEPRODUCT) to the index of the book group
+  const issueToBookIndex = new Map<number, number>();
+  for (let i = 0; i < groupCount; i++) {
+    const book = toggledBooks[i];
+    for (const issue of book.Issue) {
+      issueToBookIndex.set(Number(issue), i);
+    }
+  }
+
+  // For each group/book: map "book printed page" -> "global pdf page"
+  const pageMapPerBook: Map<number, number>[] = [];
+  for (let i = 0; i < groupCount; i++) {
+    const m = new Map<number, number>();
+    const group = pageNum[i] || [];
+
+    for (const [pdfPage, bookPage] of group) {
+      if (bookPage == null) continue;
+      const bp = Number(bookPage);
+      if (!Number.isFinite(bp)) continue;
+
+      // If multiple pdf pages share the same printed page, keep the first occurrence
+      if (!m.has(bp)) m.set(bp, pdfPage);
     }
 
-    // For each group/book: map "book printed page" -> "global pdf page"
-    const pageMapPerBook: Map<number, number>[] = [];
-    for (let i = 0; i < groupCount; i++) {
-      const m = new Map<number, number>();
-      const group = pageNum[i] || [];
+    pageMapPerBook[i] = m;
+  }
 
-      for (const [pdfPage, bookPage] of group) {
-        if (bookPage == null) continue;
-        const bp = Number(bookPage);
-        if (!Number.isFinite(bp)) continue;
+  type TempEntry = {
+    pdfPage: number;
+    bookPage: number;
+    label: string;
+    level: number;
+    order: number;
+  };
 
-        // If multiple pdf pages share the same printed page, keep the first occurrence
-        if (!m.has(bp)) m.set(bp, pdfPage);
+  const tempResult: TempEntry[][] = Array.from(
+    { length: groupCount },
+    () => []
+  );
+
+  for (const entry of entries) {
+    const bookIdx = issueToBookIndex.get(Number(entry.zIssue));
+    if (bookIdx === undefined) continue; // TOC for a non-exported book
+
+    const pageMap = pageMapPerBook[bookIdx];
+    if (!pageMap) continue;
+
+    // ZPAGENUMBER comes from SQLite as text -> convert to number
+    const bookPageNum = Number(entry.pagenum);
+    if (!Number.isFinite(bookPageNum)) continue;
+
+    const pdfPage = pageMap.get(bookPageNum);
+    if (pdfPage === undefined) continue; // that printed page isn't in the export
+
+    const label =
+      (entry.chapterSection ? entry.chapterSection + ' ' : '') +
+      entry.title;
+
+    tempResult[bookIdx].push({
+      pdfPage,
+      bookPage: bookPageNum,
+      label,
+      level: entry.zLevel,
+      order: entry.zOrder,
+    });
+  }
+
+  // After you've built tempResult[bookIdx] but before sorting:
+  for (const bookEntries of tempResult) {
+    for (let i = bookEntries.length - 1; i >= 0; i--) {
+      const e = bookEntries[i];
+
+      // Must have a valid mapped PDF page
+      if (!Number.isFinite(e.pdfPage) || e.pdfPage <= 0) {
+        bookEntries.splice(i, 1);
+        continue;
       }
 
-      pageMapPerBook[i] = m;
+      // Book page sanity
+      if (!Number.isFinite(e.bookPage) || e.bookPage <= 0) {
+        bookEntries.splice(i, 1);
+        continue;
+      }
+
+      // Label sanity
+      if (!e.label || typeof e.label !== 'string' || e.label.trim().length === 0) {
+        bookEntries.splice(i, 1);
+        continue;
+      }
+
+      e.label = e.label.trim();
     }
+  }
 
-    type TempEntry = {
-      pdfPage: number;
-      bookPage: number;
-      label: string;
-      level: number;
-      order: number;
-    };
-
-    const tempResult: TempEntry[][] = Array.from(
-      { length: groupCount },
-      () => []
-    );
-
-    for (const entry of entries) {
-      const bookIdx = issueToBookIndex.get(Number(entry.zIssue));
-      if (bookIdx === undefined) continue; // TOC for a non-exported book
-
-      const pageMap = pageMapPerBook[bookIdx];
-      if (!pageMap) continue;
-
-      // ZPAGENUMBER comes from SQLite as text -> convert to number
-      const bookPageNum = Number(entry.pagenum);
-      if (!Number.isFinite(bookPageNum)) continue;
-
-      const pdfPage = pageMap.get(bookPageNum);
-      if (pdfPage === undefined) continue; // that printed page isn't in the export
-
-      const label =
-        (entry.chapterSection ? entry.chapterSection + ' ' : '') +
-        entry.title;
-
-      tempResult[bookIdx].push({
-        pdfPage,
-        bookPage: bookPageNum,
-        label,
-        level: entry.zLevel,
-        order: entry.zOrder,
-      });
-    }
-
-    // After you've built tempResult[bookIdx] but before sorting:
-    for (const bookEntries of tempResult) {
-      for (let i = bookEntries.length - 1; i >= 0; i--) {
-        const e = bookEntries[i];
-
-        // Must have a valid mapped PDF page
-        if (!Number.isFinite(e.pdfPage) || e.pdfPage <= 0) {
-          bookEntries.splice(i, 1);
-          continue;
-        }
-
-        // Book page sanity
-        if (!Number.isFinite(e.bookPage) || e.bookPage <= 0) {
-          bookEntries.splice(i, 1);
-          continue;
-        }
-
-        // Label sanity
-        if (!e.label || typeof e.label !== 'string' || e.label.trim().length === 0) {
-          bookEntries.splice(i, 1);
-          continue;
-        }
-
-        e.label = e.label.trim();
-      }
-    }
-
-    // Sort each book’s TOC entries by book page, then by ZORDER
-    const result: MergedTOCEntry[][] = tempResult.map((bookEntries, bookIdx) => {
-      bookEntries.sort((a, b) => {
-        if (a.bookPage !== b.bookPage) return a.bookPage - b.bookPage;
-        if (a.order !== b.order) return a.order - b.order;
-        return a.label.localeCompare(b.label);
-      });
-
-      // SPECIAL CASE:
-      // If the first 2 entries are on the same page and the first one
-      // is "less top-level" (higher order or same order but deeper level),
-      // drop the first one. This filters out "FACH 010" etc.
-      if (bookEntries.length >= 2) {
-        const first = bookEntries[0];
-        const second = bookEntries[1];
-
-        const samePage =
-          first.bookPage === second.bookPage &&
-          first.pdfPage === second.pdfPage;
-
-        const firstHasHigherOrder = first.order > second.order;
-        const sameOrderFirstDeeper =
-          first.order === second.order && first.level > second.level;
-
-        if (samePage && (firstHasHigherOrder || sameOrderFirstDeeper)) {
-          bookEntries.shift();
-        }
-      }
-
-      // INSERT BOOK TITLE AS TOP-LEVEL ENTRY + SHIFT LEVELS
-      if (bookEntries.length > 0) {
-        const first = bookEntries[0];
-
-        // Titel can be string, string[], or something else -> normalise
-        const rawTitle = (toggledBooks[bookIdx] as any)?.Titel;
-
-        let bookTitle = '';
-        if (Array.isArray(rawTitle)) {
-          // take first entry if it's an array
-          bookTitle = String(rawTitle[0] ?? '');
-        } else if (typeof rawTitle === 'string') {
-          bookTitle = rawTitle;
-        } else if (rawTitle != null) {
-          // fallback for odd cases (number, etc.)
-          bookTitle = String(rawTitle);
-        }
-
-        bookTitle = bookTitle.trim();
-
-        if (bookTitle.length > 0) {
-          // Raise the level of all existing entries by +1
-          for (const e of bookEntries) {
-            e.level = e.level + 1;
-          }
-
-          // Insert the book title as the very first entry
-          bookEntries.unshift({
-            pdfPage: first.pdfPage,
-            bookPage: first.bookPage,
-            label: bookTitle,
-            level: 1,
-            // order is not used after this point, 0 keeps it at the top if re-sorted
-            order: 0,
-          });
-        }
-      }
-
-      return bookEntries.map(
-        (e) => [e.pdfPage, e.bookPage, e.label, e.level] as MergedTOCEntry
-      );
+  // Sort each book’s TOC entries by book page, then by ZORDER
+  const result: MergedTOCEntry[][] = tempResult.map((bookEntries, bookIdx) => {
+    bookEntries.sort((a, b) => {
+      if (a.bookPage !== b.bookPage) return a.bookPage - b.bookPage;
+      if (a.order !== b.order) return a.order - b.order;
+      return a.label.localeCompare(b.label);
     });
 
-    return result;
-  }
+    // SPECIAL CASE:
+    // If the first 2 entries are on the same page and the first one
+    // is "less top-level" (higher order or same order but deeper level),
+    // drop the first one. This filters out "FACH 010" etc.
+    if (bookEntries.length >= 2) {
+      const first = bookEntries[0];
+      const second = bookEntries[1];
+
+      const samePage =
+        first.bookPage === second.bookPage &&
+        first.pdfPage === second.pdfPage;
+
+      const firstHasHigherOrder = first.order > second.order;
+      const sameOrderFirstDeeper =
+        first.order === second.order && first.level > second.level;
+
+      if (samePage && (firstHasHigherOrder || sameOrderFirstDeeper)) {
+        bookEntries.shift();
+      }
+    }
+
+    // INSERT BOOK TITLE AS TOP-LEVEL ENTRY + SHIFT LEVELS
+    if (bookEntries.length > 0) {
+      const first = bookEntries[0];
+
+      // Titel can be string, string[], or something else -> normalise
+      const rawTitle = (toggledBooks[bookIdx] as any)?.Titel;
+
+      let bookTitle = '';
+      if (Array.isArray(rawTitle)) {
+        // take first entry if it's an array
+        bookTitle = String(rawTitle[0] ?? '');
+      } else if (typeof rawTitle === 'string') {
+        bookTitle = rawTitle;
+      } else if (rawTitle != null) {
+        // fallback for odd cases (number, etc.)
+        bookTitle = String(rawTitle);
+      }
+
+      bookTitle = bookTitle.trim();
+
+      if (bookTitle.length > 0) {
+        // Raise the level of all existing entries by +1
+        for (const e of bookEntries) {
+          e.level = e.level + 1;
+        }
+
+        // Insert the book title as the very first entry
+        bookEntries.unshift({
+          pdfPage: first.pdfPage,
+          bookPage: first.bookPage,
+          label: bookTitle,
+          level: 1,
+          // order is not used after this point, 0 keeps it at the top if re-sorted
+          order: 0,
+        });
+      }
+    }
+
+    return bookEntries.map(
+      (e) => [e.pdfPage, e.bookPage, e.label, e.level] as MergedTOCEntry
+    );
+  });
+
+  return result;
+}

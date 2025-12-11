@@ -54,6 +54,7 @@ type Book = {
     CourseName: string;
     Refrence: string;
     Issue: number[];
+    Lang: string;
     Toggled: boolean;
 };
 

@@ -693,7 +693,6 @@ export async function getTOCData(): Promise<TOCData[]> {
 }
 
 // TODO: make toc clickable in pdf
-// TODO: toc items can only be 1 line even if long
 async function insertTocPagesForBooks(
   mergedPdfDoc: PDFDocument,
   books: Book[],
@@ -729,6 +728,61 @@ async function insertTocPagesForBooks(
   const tocFont = await mergedPdfDoc.embedFont(StandardFonts.Helvetica);
   const tocTitleFont = await mergedPdfDoc.embedFont(StandardFonts.HelveticaBold);
   const tocLevel1Font = tocTitleFont;
+
+  function wrapText(
+    text: string,
+    maxWidth: number,
+    font: any,
+    fontSize: number
+  ): string[] {
+    const words = (text || '').split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+
+      if (testWidth <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        if (currentLine) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          // Single word longer than max width: hard-break by characters
+          let remaining = word;
+          while (remaining.length > 0) {
+            let low = 1;
+            let high = remaining.length;
+            let fitChars = 1;
+
+            while (low <= high) {
+              const mid = Math.floor((low + high) / 2);
+              const piece = remaining.slice(0, mid);
+              const w = font.widthOfTextAtSize(piece, fontSize);
+              if (w <= maxWidth) {
+                fitChars = mid;
+                low = mid + 1;
+              } else {
+                high = mid - 1;
+              }
+            }
+
+            lines.push(remaining.slice(0, fitChars));
+            remaining = remaining.slice(fitChars);
+          }
+          currentLine = '';
+        }
+      }
+    }
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    return lines.length ? lines : [''];
+  }
 
   type TocGap = { startBookPage: number; length: number };
 
@@ -842,9 +896,37 @@ async function insertTocPagesForBooks(
     }
 
     // Paginate this book's TOC entries for the *page TOC* (no book title, levels shifted)
-    const paginatedEntries: MergedTOCEntry[][] = [];
-    for (let i = 0; i < pageTocEntries.length; i += MAX_LINES_PER_PAGE) {
-      paginatedEntries.push(pageTocEntries.slice(i, i + MAX_LINES_PER_PAGE));
+    type PagedEntry = { entry: MergedTOCEntry; lines: string[] };
+
+    const paginatedEntries: PagedEntry[][] = [];
+    let currentPage: PagedEntry[] = [];
+    let currentLineCount = 0;
+
+    for (const entry of pageTocEntries) {
+      const [_, __, label, level] = entry;
+      const safeLevel = level && level > 0 ? level : 1;
+      const indent = (safeLevel - 1) * 16;
+      const textX = MARGIN_LEFT + indent;
+      const entryFont = safeLevel === 1 ? tocLevel1Font : tocFont;
+
+      const maxTextWidth = A4_WIDTH - MARGIN_RIGHT - textX - 32;
+      const wrappedLines = wrapText(label || '', maxTextWidth, entryFont, ENTRY_FONT_SIZE);
+      const neededLines = wrappedLines.length;
+
+      if (currentLineCount + neededLines > MAX_LINES_PER_PAGE) {
+        if (currentPage.length > 0) {
+          paginatedEntries.push(currentPage);
+        }
+        currentPage = [];
+        currentLineCount = 0;
+      }
+
+      currentPage.push({ entry, lines: wrappedLines });
+      currentLineCount += neededLines;
+    }
+
+    if (currentPage.length > 0) {
+      paginatedEntries.push(currentPage);
     }
 
     const pagesInserted = paginatedEntries.length;
@@ -914,10 +996,12 @@ async function insertTocPagesForBooks(
         y -= TITLE_FONT_SIZE + 10;
       }
 
-      // Draw each TOC line
-      for (const [_, bookPage, label, level] of entriesForPage) {
+      // Draw each TOC entry with wrapped lines, respecting MAX_LINES_PER_PAGE
+      for (const { entry, lines } of entriesForPage) {
+        const [_, bookPage, _label, level] = entry;
+
         if (y < 72) {
-          // Safety check; in theory MAX_LINES_PER_PAGE should prevent this
+          // Safety check; in theory line-based pagination should prevent this
           break;
         }
 
@@ -925,41 +1009,39 @@ async function insertTocPagesForBooks(
         const indent = (safeLevel - 1) * 16;
         const textX = MARGIN_LEFT + indent;
 
-        // level 1 entries should be bold
         const entryFont = safeLevel === 1 ? tocLevel1Font : tocFont;
 
-        let displayLabel = label || '';
-        const maxTextWidth = A4_WIDTH - MARGIN_RIGHT - textX - 32;
-        const labelWidth = entryFont.widthOfTextAtSize(displayLabel, ENTRY_FONT_SIZE);
-        if (labelWidth > maxTextWidth) {
-          // approximate truncation
-          const ratio = maxTextWidth / labelWidth;
-          const approxChars = Math.max(4, Math.floor(displayLabel.length * ratio) - 3);
-          displayLabel = displayLabel.slice(0, approxChars) + '…';
+        let lastLineY: number | null = null;
+
+        for (const line of lines) {
+          if (y < 72) break;
+
+          page.drawText(line, {
+            x: textX,
+            y,
+            size: ENTRY_FONT_SIZE,
+            font: entryFont,
+            color: rgb(0, 0, 0),
+          });
+
+          lastLineY = y;
+          y -= LINE_HEIGHT;
         }
 
-        page.drawText(displayLabel, {
-          x: textX,
-          y,
-          size: ENTRY_FONT_SIZE,
-          font: entryFont,
-          color: rgb(0, 0, 0),
-        });
-
-        if (bookPage != null) {
+        // Draw the page number aligned with the *last* drawn line for this entry
+        if (bookPage != null && lastLineY != null) {
           const pageText = String(bookPage);
           const pageWidth = tocFont.widthOfTextAtSize(pageText, ENTRY_FONT_SIZE);
           const pageX = A4_WIDTH - MARGIN_RIGHT - pageWidth;
+
           page.drawText(pageText, {
             x: pageX,
-            y,
+            y: lastLineY,
             size: ENTRY_FONT_SIZE,
             font: tocFont,
             color: rgb(0, 0, 0),
           });
         }
-
-        y -= LINE_HEIGHT;
       }
 
       insertIndex++;

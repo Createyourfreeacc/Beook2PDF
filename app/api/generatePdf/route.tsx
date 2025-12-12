@@ -1,16 +1,3 @@
-//first get all resources neccessary
-//second stitch together the content
-//third load content and convert to pdf
-// TODO: navigation/footer space is removed but should be used in the background to gain additional info for each page!
-//       this info could then be used to determin each pages content (chapter/topic/page num)
-//       could be used to make links within the book functional, display page num, place quiz at correct place, create better toc and so forth
-
-// TODO: add back navigation/footer??????
-
-//TODO: Show page info in pdf footer (use last/next page info text for the current page)
-
-//TODO: show title of book on the left bottom footer??? & Fach 010, if somehow possible
-
 import { NextRequest, NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
 import puppeteer from 'puppeteer';
@@ -27,8 +14,11 @@ import {
   rgb,
   PDFFont,
 } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 import { setProgress, setPhaseProgress } from '@/lib/progressStore';
 import { getResolvedPaths } from '@/lib/config';
+import fs from 'fs';
+import path from 'path';
 
 const { dbPath: DB_PATH } = getResolvedPaths();
 
@@ -73,6 +63,18 @@ type PageMapping = [number, number | null];
 // [pdf page number, book page number, toc item titel, toc item level]
 type MergedTOCEntry = [number, number | null, string, number];
 
+type QuizAsset = {
+  id: number;
+  mediaType: string;
+  dataUrl: string;
+};
+
+type QuizSharedAssetGroup = {
+  id: number;
+  questionNumbers: number[]; // 1-based indices in this chapter
+  pages: QuizAsset[];        // multi-page asset sets
+};
+
 type QuizAnswer = {
   id: number;
   number: number;
@@ -88,6 +90,7 @@ type QuizQuestion = {
   exerciseCode: string | null;
   exerciseId: number;
   answers: QuizAnswer[];
+  assets: QuizAsset[];
 };
 
 type QuizChapter = {
@@ -96,13 +99,14 @@ type QuizChapter = {
   ref: string | null;
   issueId: string | null;
   questions: QuizQuestion[];
+  sharedAssets: QuizSharedAssetGroup[];
 };
 
 type QuizBook = {
   id: number;               // cd.Z_PK
   courseId: string | null;  // cd.ZCOURSEID
   ref: string | null;       // cd.ZREFERENCE
-  title: string;            // nice label taken from your Book object
+  title: string;            // nice label from your Book object
   chapters: QuizChapter[];
 };
 
@@ -129,6 +133,58 @@ type RawQuizRow = {
   answerText: string | null;
   answerIsCorrect: number | null;
 };
+
+type AssetRow = {
+  exerciseId: number;
+  resId: number;
+  mediaType: string | null;
+  data: Buffer | null;
+};
+
+// Use Montserrat Unicode fonts from assets/fonts for all pdf-lib text we draw
+const FONT_DIR = path.join(process.cwd(), 'assets', 'fonts');
+const MONT_REGULAR_PATH = path.join(
+  FONT_DIR,
+  'montserrat-v13-latin_latin-ext-regular.ttf'
+);
+const MONT_BOLD_PATH = path.join(
+  FONT_DIR,
+  'montserrat-v13-latin_latin-ext-700.ttf'
+);
+
+let montserratRegularBytes: Uint8Array | null = null;
+let montserratBoldBytes: Uint8Array | null = null;
+
+function getFontBytes(kind: 'regular' | 'bold'): Uint8Array {
+  if (kind === 'regular') {
+    if (!montserratRegularBytes) {
+      montserratRegularBytes = fs.readFileSync(MONT_REGULAR_PATH);
+    }
+    return montserratRegularBytes;
+  } else {
+    if (!montserratBoldBytes) {
+      montserratBoldBytes = fs.readFileSync(MONT_BOLD_PATH);
+    }
+    return montserratBoldBytes;
+  }
+}
+
+// Helper: get Unicode-capable fonts for this PDF document
+async function getUnicodeFonts(
+  pdfDoc: PDFDocument
+): Promise<{ bodyFont: PDFFont; boldFont: PDFFont }> {
+  const regularBytes = getFontBytes('regular');
+  const boldBytes = getFontBytes('bold');
+  const bodyFont = await pdfDoc.embedFont(regularBytes, { subset: true });
+  const boldFont = await pdfDoc.embedFont(boldBytes, { subset: true });
+  return { bodyFont, boldFont };
+}
+
+// Helper: normalize to NFC so combining marks become precomposed glyphs
+function normalizePdfText(text: string | null | undefined): string {
+  if (!text) return '';
+  return text.normalize('NFC');
+}
 
 function getPageInfoNumber(html: string): number | null {
   const target = '<span class="pageInfo">';
@@ -522,6 +578,7 @@ export async function generateMergedPdf(
 
   setPhaseProgress(jobId, 'convert', 1);
   const mergedPdfDoc = await PDFDocument.create();
+  mergedPdfDoc.registerFontkit(fontkit);
 
   // One printed page number (or null) per HTML page, in order
   const printedPageNumbers: (number | null)[] = htmlPages.map(getPageInfoNumber);
@@ -1642,27 +1699,106 @@ function extractQuizChapterNumberPrefix(title: string | null): number {
   return match ? parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
 }
 
+function formatQuestionNumbers(nums: number[]): string {
+  if (!nums || nums.length === 0) return '';
+  const sorted = [...nums].sort((a, b) => a - b);
+  const ranges: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const n = sorted[i];
+    if (n === prev + 1) {
+      prev = n;
+      continue;
+    }
+    if (start === prev) {
+      ranges.push(`${start}`);
+    } else {
+      ranges.push(`${start}–${prev}`);
+    }
+    start = prev = n;
+  }
+
+  if (start === prev) {
+    ranges.push(`${start}`);
+  } else {
+    ranges.push(`${start}–${prev}`);
+  }
+
+  return ranges.join(', ');
+}
+
 async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
   const toggledBooks = books.filter((b) => b.Toggled);
   if (toggledBooks.length === 0) return [];
 
-  // BookID is cd.Z_PK as string
-  const bookIds = Array.from(
-    new Set(
-      toggledBooks
-        .map((b) => {
-          const n = parseInt(b.BookID, 10);
-          return Number.isFinite(n) ? n : null;
-        })
-        .filter((n): n is number => n !== null)
-    )
-  );
+  // Map cd.Z_PK -> Book (from the UI selection)
+  const toggledByPk = new Map<number, Book>();
+  const bookIds: number[] = [];
+
+  for (const b of toggledBooks) {
+    const n = parseInt(b.BookID, 10);
+    if (!Number.isNaN(n)) {
+      toggledByPk.set(n, b);
+      bookIds.push(n);
+    }
+  }
   if (bookIds.length === 0) return [];
 
   const db = sqlite(DB_PATH);
   try {
     const placeholders = bookIds.map(() => '?').join(', ');
 
+    // --------------------------------------------------------------
+    // 1) Load exercise assets (images) once, like the Quiz tab
+    // --------------------------------------------------------------
+    const assetRows = db
+      .prepare(
+        `
+        SELECT
+          er."Z_EXERCISES" AS exerciseId,
+          er."Z_RESOURCES" AS resId,
+          r."ZMEDIATYPE"   AS mediaType,
+          r."ZDATA"        AS data
+        FROM Z_EXERCISE_RESOURCE er
+        LEFT JOIN ZILPRESOURCE r
+          ON r."Z_PK" = er."Z_RESOURCES"
+      `
+      )
+      .all() as AssetRow[];
+
+    const assetById = new Map<number, QuizAsset>();
+    const exerciseAssetIds = new Map<number, number[]>();
+
+    for (const row of assetRows) {
+      if (!row.mediaType || !row.data) continue;
+      const mediaType = row.mediaType.toLowerCase();
+      if (!mediaType.startsWith('image/')) continue; // only embed images
+
+      let asset = assetById.get(row.resId);
+      if (!asset) {
+        const buf = Buffer.isBuffer(row.data)
+          ? row.data
+          : Buffer.from(row.data as any);
+        const base64 = buf.toString('base64');
+        const dataUrl = `data:${row.mediaType};base64,${base64}`;
+        asset = {
+          id: row.resId,
+          mediaType: row.mediaType,
+          dataUrl,
+        };
+        assetById.set(row.resId, asset);
+      }
+
+      const list = exerciseAssetIds.get(row.exerciseId) ?? [];
+      list.push(row.resId);
+      exerciseAssetIds.set(row.exerciseId, list);
+    }
+
+    // --------------------------------------------------------------
+    // 2) Main query: Question -> Exercise -> Issue -> Course
+    // --------------------------------------------------------------
     const rows = db
       .prepare(
         `
@@ -1720,12 +1856,15 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
           ex."ZEXERCISEID",
           q."ZREFERENCE",
           ans."ZNUMBER"
-        `
+      `
       )
       .all(...bookIds) as RawQuizRow[];
 
     if (rows.length === 0) return [];
 
+    // --------------------------------------------------------------
+    // 3) Aggregate rows → books → chapters → questions (+ assets)
+    // --------------------------------------------------------------
     const booksMap = new Map<
       number,
       {
@@ -1749,6 +1888,7 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
                 exerciseTitle: string | null;
                 exerciseCode: string | null;
                 exerciseId: number;
+                assets: QuizAsset[];
                 answers: QuizAnswer[];
               }
             >;
@@ -1761,21 +1901,24 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
       // --- Book ---
       let book = booksMap.get(row.bookId);
       if (!book) {
-        const toggledBook = toggledBooks.find(
-          (b) => parseInt(b.BookID, 10) === row.bookId
-        );
+        const toggledBook = toggledByPk.get(row.bookId);
 
-        const titleFromBook =
-          toggledBook?.Titel ||
-          toggledBook?.CourseName ||
-          toggledBook?.Refrence ||
+        const titleFromBooks =
+          (toggledBook?.Titel ?? '').toString().trim() ||
+          (toggledBook?.CourseName ?? '').toString().trim() ||
+          (toggledBook?.Refrence ?? '').toString().trim();
+
+        const finalTitle =
+          titleFromBooks ||
+          row.bookCourseId ||
+          row.bookRef ||
           `Buch ${row.bookId}`;
 
         book = {
           id: row.bookId,
           courseId: row.bookCourseId,
           ref: row.bookRef,
-          title: titleFromBook,
+          title: finalTitle,
           chapters: new Map(),
         };
         booksMap.set(row.bookId, book);
@@ -1801,6 +1944,11 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
       // --- Question ---
       let question = chapter.questions.get(row.questionId);
       if (!question) {
+        const assetIds = exerciseAssetIds.get(row.exerciseId) ?? [];
+        const assets = assetIds
+          .map((id) => assetById.get(id))
+          .filter((a): a is QuizAsset => !!a);
+
         question = {
           id: row.questionId,
           ref: row.questionRef,
@@ -1808,6 +1956,7 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
           exerciseTitle: row.exerciseTitle,
           exerciseCode: row.exerciseCode,
           exerciseId: row.exerciseId,
+          assets,
           answers: [],
         };
         chapter.questions.set(row.questionId, question);
@@ -1827,6 +1976,11 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
       }
     }
 
+    // --------------------------------------------------------------
+    // 4) Convert to arrays, sort, and pull out shared assets per chapter
+    // --------------------------------------------------------------
+    const SHARED_THRESHOLD = 3; // must be used by ≥3 questions to become "shared"
+
     const quizBooks: QuizBook[] = Array.from(booksMap.values()).map(
       (book) => {
         const chapters: QuizChapter[] = Array.from(book.chapters.values())
@@ -1835,23 +1989,93 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
               extractQuizChapterNumberPrefix(a.title) -
               extractQuizChapterNumberPrefix(b.title)
           )
-          .map((ch) => ({
-            id: ch.id,
-            title: ch.title,
-            ref: ch.ref,
-            issueId: ch.issueId,
-            questions: Array.from(ch.questions.values()).map((q) => ({
+          .map((ch) => {
+            // questions array (keep current insertion order)
+            const questions: QuizQuestion[] = Array.from(
+              ch.questions.values()
+            ).map((q) => ({
               id: q.id,
               ref: q.ref,
               text: q.text,
               exerciseTitle: q.exerciseTitle,
               exerciseCode: q.exerciseCode,
               exerciseId: q.exerciseId,
-              answers: q.answers
-                .slice()
-                .sort((a, b) => a.number - b.number),
-            })),
-          }));
+              assets: [...q.assets],
+              answers: [...q.answers].sort(
+                (a, b) => a.number - b.number
+              ),
+            }));
+
+            // Build asset usage: assetId -> { asset, questionIndices }
+            const usage = new Map<
+              number,
+              { asset: QuizAsset; questionIndices: number[] }
+            >();
+
+            questions.forEach((q, idx) => {
+              q.assets.forEach((asset) => {
+                const existing = usage.get(asset.id);
+                if (!existing) {
+                  usage.set(asset.id, {
+                    asset,
+                    questionIndices: [idx + 1], // 1-based
+                  });
+                } else {
+                  existing.questionIndices.push(idx + 1);
+                }
+              });
+            });
+
+            // Group assets by identical question sets to form multi-page groups
+            const groupsMap = new Map<
+              string,
+              { assets: QuizAsset[]; questionNumbers: number[] }
+            >();
+
+            for (const { asset, questionIndices } of usage.values()) {
+              if (questionIndices.length < SHARED_THRESHOLD) continue;
+              const key = questionIndices.join(',');
+              let group = groupsMap.get(key);
+              if (!group) {
+                group = {
+                  assets: [],
+                  questionNumbers: [...questionIndices],
+                };
+                groupsMap.set(key, group);
+              }
+              group.assets.push(asset);
+            }
+
+            const sharedGroups = Array.from(groupsMap.values());
+
+            // Remove shared assets from per-question lists
+            const sharedIds = new Set<number>();
+            sharedGroups.forEach((g) =>
+              g.assets.forEach((a) => sharedIds.add(a.id))
+            );
+
+            questions.forEach((q) => {
+              q.assets = q.assets.filter(
+                (a) => !sharedIds.has(a.id)
+              );
+            });
+
+            const sharedAssets: QuizSharedAssetGroup[] =
+              sharedGroups.map((g, idx) => ({
+                id: idx,
+                questionNumbers: g.questionNumbers,
+                pages: g.assets,
+              }));
+
+            return {
+              id: ch.id,
+              title: ch.title,
+              ref: ch.ref,
+              issueId: ch.issueId,
+              questions,
+              sharedAssets,
+            };
+          });
 
         return {
           id: book.id,
@@ -1869,6 +2093,55 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
   }
 }
 
+function parseDataUrlToBuffer(
+  dataUrl: string
+): { mimeType: string; buffer: Uint8Array } | null {
+  if (!dataUrl || !dataUrl.startsWith('data:')) return null;
+  const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+  if (!match) return null;
+  const mimeType = match[1];
+  const base64 = match[2];
+  const buffer = Buffer.from(base64, 'base64');
+  return { mimeType, buffer };
+}
+
+async function embedQuizImage(
+  pdfDoc: PDFDocument,
+  asset: QuizAsset,
+  cache: Map<number, any>
+) {
+  if (!asset || !asset.dataUrl || !asset.mediaType) return null;
+
+  const cached = cache.get(asset.id);
+  if (cached) return cached;
+
+  const parsed = parseDataUrlToBuffer(asset.dataUrl);
+  if (!parsed) return null;
+
+  const { mimeType, buffer } = parsed;
+  let image: any;
+  try {
+    if (mimeType === 'image/png') {
+      image = await pdfDoc.embedPng(buffer);
+    } else if (
+      mimeType === 'image/jpeg' ||
+      mimeType === 'image/jpg' ||
+      mimeType === 'image/pjpeg'
+    ) {
+      image = await pdfDoc.embedJpg(buffer);
+    } else {
+      // unsupported type – skip silently
+      return null;
+    }
+  } catch (err) {
+    console.error('Failed to embed quiz image', err);
+    return null;
+  }
+
+  cache.set(asset.id, image);
+  return image;
+}
+
 async function appendQuizPagesToPdf(
   pdfDoc: PDFDocument,
   quizBooks: QuizBook[]
@@ -1877,8 +2150,7 @@ async function appendQuizPagesToPdf(
     return pdfDoc;
   }
 
-  const bodyFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const { bodyFont, boldFont } = await getUnicodeFonts(pdfDoc);
 
   const margin = 50;
   const sectionSpacing = 24;
@@ -1890,8 +2162,11 @@ async function appendQuizPagesToPdf(
   const titleFontSize = 16;
   const chapterFontSize = 12;
 
-  const maxWidth = A4_WIDTH - 2 * margin;
+  const maxTextWidth = A4_WIDTH - 2 * margin;
   const answerIndent = 20;
+  const imageGap = 8;
+
+  const usablePageHeight = A4_HEIGHT - 2 * margin;
 
   let page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
   let y = A4_HEIGHT - margin;
@@ -1901,16 +2176,18 @@ async function appendQuizPagesToPdf(
     y = A4_HEIGHT - margin;
   };
 
-  const usablePageHeight = A4_HEIGHT - 2 * margin;
+  // Cache embedded images so each asset is only embedded once
+  const imageCache = new Map<number, any>();
 
   for (const book of quizBooks) {
-    const bookTitle = book.title || 'Quiz';
+    const bookTitle = normalizePdfText(book.title || 'Quiz');
 
-    // Book heading
     if (y < margin + 3 * lineHeight) {
       startNewPage();
     }
 
+    // Book heading
+    //TODO: Localize
     page.drawText(`Quiz – ${bookTitle}`, {
       x: margin,
       y,
@@ -1920,15 +2197,18 @@ async function appendQuizPagesToPdf(
     y -= sectionSpacing;
 
     for (const chapter of book.chapters) {
-      if (!chapter.questions || chapter.questions.length === 0) continue;
+      const questions = chapter.questions || [];
+      if (questions.length === 0) continue;
 
-      // Chapter heading
       if (y < margin + 3 * lineHeight) {
         startNewPage();
       }
 
-      const chapterTitle = chapter.title || 'Kapitel';
+      const chapterTitle = normalizePdfText(
+        chapter.title || 'Kapitel'
+      );
 
+      // Chapter heading
       page.drawText(chapterTitle, {
         x: margin,
         y,
@@ -1937,13 +2217,94 @@ async function appendQuizPagesToPdf(
       });
       y -= sectionSpacing;
 
+      // ------------------------------------------------------
+      // 1) Shared assets (chapter-level), like in the Quiz tab
+      // ------------------------------------------------------
+      const sharedGroups = chapter.sharedAssets || [];
+      for (const group of sharedGroups) {
+        const pages = group.pages || [];
+
+        for (const asset of pages) {
+          const image = await embedQuizImage(
+            pdfDoc,
+            asset,
+            imageCache
+          );
+          if (!image) continue;
+
+          const origWidth = image.width;
+          const origHeight = image.height;
+
+          const maxImageWidth = maxTextWidth;
+          const maxImageHeight = usablePageHeight * 0.6;
+
+          const scale = Math.min(
+            maxImageWidth / origWidth,
+            maxImageHeight / origHeight,
+            1
+          );
+
+          const drawWidth = origWidth * scale;
+          const drawHeight = origHeight * scale;
+
+          if (y - drawHeight < margin) {
+            startNewPage();
+          }
+
+          const xImg = margin + (maxTextWidth - drawWidth) / 2;
+          y -= drawHeight;
+          page.drawImage(image, {
+            x: xImg,
+            y,
+            width: drawWidth,
+            height: drawHeight,
+          });
+          y -= imageGap;
+        }
+
+        //TODO: Localize
+        const caption =
+          group.questionNumbers && group.questionNumbers.length
+            ? `Material für Fragen ${formatQuestionNumbers(
+                group.questionNumbers
+              )}`
+            : 'Material für mehrere Fragen';
+
+        const captionLines = wrapText(
+          normalizePdfText(caption),
+          maxTextWidth,
+          bodyFont,
+          questionFontSize
+        );
+
+        for (const line of captionLines) {
+          if (y < margin + 2 * lineHeight) {
+            startNewPage();
+          }
+          page.drawText(line, {
+            x: margin,
+            y,
+            size: questionFontSize,
+            font: bodyFont,
+          });
+          y -= lineHeight;
+        }
+
+        y -= sectionSpacing;
+      }
+
+      // ------------------------------------------------------
+      // 2) Questions + per-question assets
+      // ------------------------------------------------------
       let questionIndex = 1;
 
-      for (const question of chapter.questions) {
-        const questionLabel = `${questionIndex}. ${question.text || ''}`;
+      for (const question of questions) {
+        const questionLabel = `${questionIndex}. ${normalizePdfText(
+          question.text || ''
+        )}`;
         const questionLines = wrapText(
           questionLabel,
-          maxWidth,
+          maxTextWidth,
           bodyFont,
           questionFontSize
         );
@@ -1952,14 +2313,15 @@ async function appendQuizPagesToPdf(
         const allAnswerLines: string[][] = [];
         let totalAnswerLines = 0;
 
-        // Pre-wrap all answers once so we can compute total block height
         for (let i = 0; i < answers.length; i++) {
           const answer = answers[i];
-          const letter = String.fromCharCode(65 + i); // A, B, C, ...
-          const answerText = `${letter}) ${answer.text || ''}`;
+          const letter = String.fromCharCode(65 + i); // A,B,...
+          const answerText = `${letter}) ${normalizePdfText(
+            answer.text || ''
+          )}`;
           const answerLines = wrapText(
             answerText,
-            maxWidth - answerIndent,
+            maxTextWidth - answerIndent,
             bodyFont,
             answerFontSize
           );
@@ -1973,20 +2335,16 @@ async function appendQuizPagesToPdf(
           totalLinesForBlock * lineHeight + questionSpacing;
 
         const availableHeight = y - margin;
-
-        // Decide whether we *try* to keep this question block together
         const canFitOnFreshPage =
           blockHeight <= usablePageHeight && blockHeight > 0;
         const keepTogether = canFitOnFreshPage;
 
         if (keepTogether && blockHeight > availableHeight) {
-          // Not enough room on this page – start the whole block on a fresh page
           startNewPage();
         }
 
-        // --- Draw question lines ---
+        // Question text
         for (const line of questionLines) {
-          // If we *can't* keep together, fall back to old per-line page break behavior
           if (!keepTogether && y < margin + 2 * lineHeight) {
             startNewPage();
           }
@@ -1999,7 +2357,7 @@ async function appendQuizPagesToPdf(
           y -= lineHeight;
         }
 
-        // --- Draw answer lines ---
+        // Answers
         for (const answerLines of allAnswerLines) {
           for (const line of answerLines) {
             if (!keepTogether && y < margin + 2 * lineHeight) {
@@ -2016,13 +2374,54 @@ async function appendQuizPagesToPdf(
         }
 
         y -= questionSpacing;
+
+        // Question-specific assets (images)
+        const questionAssets = question.assets || [];
+        for (const asset of questionAssets) {
+          const image = await embedQuizImage(
+            pdfDoc,
+            asset,
+            imageCache
+          );
+          if (!image) continue;
+
+          const origWidth = image.width;
+          const origHeight = image.height;
+          const maxImageWidth = maxTextWidth;
+          const maxImageHeight = usablePageHeight * 0.6;
+
+          const scale = Math.min(
+            maxImageWidth / origWidth,
+            maxImageHeight / origHeight,
+            1
+          );
+
+          const drawWidth = origWidth * scale;
+          const drawHeight = origHeight * scale;
+
+          if (y - drawHeight < margin) {
+            startNewPage();
+          }
+
+          const xImg = margin + (maxTextWidth - drawWidth) / 2;
+          y -= drawHeight;
+          page.drawImage(image, {
+            x: xImg,
+            y,
+            width: drawWidth,
+            height: drawHeight,
+          });
+          y -= imageGap;
+        }
+
+        y -= sectionSpacing / 2;
         questionIndex++;
       }
 
-      y -= sectionSpacing; // gap between chapters
+      y -= sectionSpacing; // between chapters
     }
 
-    y -= sectionSpacing; // gap between books
+    y -= sectionSpacing; // between books
   }
 
   return pdfDoc;
@@ -2091,7 +2490,7 @@ async function appendQuizSolutionPagesToPdf(
     return pdfDoc;
   }
 
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const { boldFont } = await getUnicodeFonts(pdfDoc);
 
   const margin = 50;
   const headerSpacing = 24;
@@ -2105,7 +2504,6 @@ async function appendQuizSolutionPagesToPdf(
   const maxWidth = A4_WIDTH - 2 * margin;
   const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
-  // configurable number of solution columns
   const numColumns = 3;
   const columnGap = 20;
   const columnWidth =
@@ -2115,17 +2513,21 @@ async function appendQuizSolutionPagesToPdf(
   let y = A4_HEIGHT - margin;
 
   const drawBookHeader = (bookTitle: string) => {
-    page.drawText(`Lösungen – ${bookTitle}`, {
-      x: margin,
-      y,
-      size: titleFontSize,
-      font: boldFont,
-    });
+    page.drawText(
+      //TODO: Localize
+      normalizePdfText(`Lösungen – ${bookTitle}`),
+      {
+        x: margin,
+        y,
+        size: titleFontSize,
+        font: boldFont,
+      }
+    );
     y -= headerSpacing;
   };
 
   const drawChapterHeader = (chapterTitle: string) => {
-    page.drawText(chapterTitle, {
+    page.drawText(normalizePdfText(chapterTitle), {
       x: margin,
       y,
       size: chapterFontSize,
@@ -2152,7 +2554,6 @@ async function appendQuizSolutionPagesToPdf(
   for (const book of quizBooks) {
     const bookTitle = book.title || 'Quiz';
 
-    // Book heading
     if (y < margin + 3 * solutionLineHeight) {
       startNewPage(bookTitle);
     } else {
@@ -2195,19 +2596,16 @@ async function appendQuizSolutionPagesToPdf(
           const correctIndex = answers.findIndex(
             (a) => a.isCorrect === true
           );
-
           if (correctIndex === -1) {
             label = `${questionIndex}. –`;
           } else {
             const letter =
               LETTERS[correctIndex] ??
               `#${answers[correctIndex].number}`;
-            // number + letter only
             label = `${questionIndex}. ${letter}`;
           }
         }
 
-        // page break if no vertical room for another row
         if (rowY < margin + solutionLineHeight) {
           startNewPage(bookTitle, chapterTitle);
           rowY = y;
@@ -2217,8 +2615,7 @@ async function appendQuizSolutionPagesToPdf(
         const x =
           margin + colIndex * (columnWidth + columnGap);
 
-        // Bold number + letter, in 3 columns across
-        page.drawText(label, {
+        page.drawText(normalizePdfText(label), {
           x,
           y: rowY,
           size: solutionFontSize,
@@ -2234,16 +2631,14 @@ async function appendQuizSolutionPagesToPdf(
         questionIndex++;
       }
 
-      // move down after last partially filled row
       finishRowIfNeeded();
-
-      // gap before next chapter
       y = rowY - sectionSpacing;
     }
 
-    // gap between books
     y -= sectionSpacing;
   }
 
   return pdfDoc;
 }
+
+

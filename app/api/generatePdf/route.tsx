@@ -25,6 +25,7 @@ import {
   PDFNumber,
   StandardFonts,
   rgb,
+  PDFFont,
 } from 'pdf-lib';
 import { setProgress, setPhaseProgress } from '@/lib/progressStore';
 import { getResolvedPaths } from '@/lib/config';
@@ -66,12 +67,68 @@ interface TOCData {
   zLevel: number;
 }
 
-
 // [pdf page number, book page number]
 type PageMapping = [number, number | null];
 
 // [pdf page number, book page number, toc item titel, toc item level]
 type MergedTOCEntry = [number, number | null, string, number];
+
+type QuizAnswer = {
+  id: number;
+  number: number;
+  text: string;
+  isCorrect: boolean | null;
+};
+
+type QuizQuestion = {
+  id: number;
+  ref: string | null;
+  text: string;
+  exerciseTitle: string | null;
+  exerciseCode: string | null;
+  exerciseId: number;
+  answers: QuizAnswer[];
+};
+
+type QuizChapter = {
+  id: number;
+  title: string;
+  ref: string | null;
+  issueId: string | null;
+  questions: QuizQuestion[];
+};
+
+type QuizBook = {
+  id: number;               // cd.Z_PK
+  courseId: string | null;  // cd.ZCOURSEID
+  ref: string | null;       // cd.ZREFERENCE
+  title: string;            // nice label taken from your Book object
+  chapters: QuizChapter[];
+};
+
+type RawQuizRow = {
+  bookId: number;
+  bookCourseId: string | null;
+  bookRef: string | null;
+
+  chapterId: number;
+  chapterTitle: string | null;
+  chapterRef: string | null;
+  issueId: string | null;
+
+  exerciseId: number;
+  exerciseTitle: string | null;
+  exerciseCode: string | null;
+
+  questionId: number;
+  questionRef: string | null;
+  questionText: string | null;
+
+  answerId: number | null;
+  answerNumber: number | null;
+  answerText: string | null;
+  answerIsCorrect: number | null;
+};
 
 function getPageInfoNumber(html: string): number | null {
   const target = '<span class="pageInfo">';
@@ -425,7 +482,7 @@ export async function generateMergedPdf(
   exportOptions: ExportOptions
 ): Promise<Uint8Array> {
   const pageCount = htmlPages.length;
-  const { generateTocPages } = exportOptions;
+  const { generateTocPages, exportQuiz } = exportOptions;
 
   if (!Array.isArray(htmlPages) || pageCount === 0) {
     throw new Error('Missing HTML pages');
@@ -536,8 +593,8 @@ export async function generateMergedPdf(
   const entries = await getTOCData();
   const tocData = mergeTOCData(books, entries, pageNum);
 
-  let pdfDocWithToc;
-  let updatedTocData;
+  let pdfDocWithToc: PDFDocument;
+  let updatedTocData: MergedTOCEntry[][];
   if (generateTocPages) {
     const result = await insertTocPagesForBooks(
       mergedPdfDoc,
@@ -551,6 +608,20 @@ export async function generateMergedPdf(
   } else {
     pdfDocWithToc = mergedPdfDoc;
     updatedTocData = tocData;
+  }
+
+  // Phase 1: append non-interactive quiz pages at the very end
+  let pdfDocWithQuiz = pdfDocWithToc;
+  if (exportQuiz) {
+    try {
+      const quizBooks = await loadQuizDataForBooks(books);
+      if (quizBooks.length > 0) {
+        pdfDocWithQuiz = await appendQuizPagesToPdf(pdfDocWithToc, quizBooks);
+      }
+    } catch (err) {
+      console.error('Failed to append quiz pages:', err);
+      // fail soft, keep main PDF
+    }
   }
 
   const PdfDoc = await addOutlineToPdf(pdfDocWithToc, updatedTocData);
@@ -777,61 +848,6 @@ async function insertTocPagesForBooks(
   const tocFont = await mergedPdfDoc.embedFont(StandardFonts.Helvetica);
   const tocTitleFont = await mergedPdfDoc.embedFont(StandardFonts.HelveticaBold);
   const tocLevel1Font = tocTitleFont;
-
-  function wrapText(
-    text: string,
-    maxWidth: number,
-    font: any,
-    fontSize: number
-  ): string[] {
-    const words = (text || '').split(/\s+/).filter(Boolean);
-    const lines: string[] = [];
-    let currentLine = '';
-
-    for (const word of words) {
-      const testLine = currentLine ? `${currentLine} ${word}` : word;
-      const testWidth = font.widthOfTextAtSize(testLine, fontSize);
-
-      if (testWidth <= maxWidth) {
-        currentLine = testLine;
-      } else {
-        if (currentLine) {
-          lines.push(currentLine);
-          currentLine = word;
-        } else {
-          // Single word longer than max width: hard-break by characters
-          let remaining = word;
-          while (remaining.length > 0) {
-            let low = 1;
-            let high = remaining.length;
-            let fitChars = 1;
-
-            while (low <= high) {
-              const mid = Math.floor((low + high) / 2);
-              const piece = remaining.slice(0, mid);
-              const w = font.widthOfTextAtSize(piece, fontSize);
-              if (w <= maxWidth) {
-                fitChars = mid;
-                low = mid + 1;
-              } else {
-                high = mid - 1;
-              }
-            }
-
-            lines.push(remaining.slice(0, fitChars));
-            remaining = remaining.slice(fitChars);
-          }
-          currentLine = '';
-        }
-      }
-    }
-
-    if (currentLine) {
-      lines.push(currentLine);
-    }
-
-    return lines.length ? lines : [''];
-  }
 
   type TocGap = { startBookPage: number; length: number };
 
@@ -1596,4 +1612,453 @@ function mergeTOCData(
   });
 
   return result;
+}
+
+function cleanQuizQuestionText(text: string | null): string {
+  if (!text) return '';
+  return text
+    .replace(/\$\{answerBlock\}/g, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?[^>]+>/g, '')
+    .trim();
+}
+
+function cleanQuizAnswerText(text: string | null): string {
+  if (!text) return '';
+  return text
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?[^>]+>/g, '')
+    .trim();
+}
+
+function extractQuizChapterNumberPrefix(title: string | null): number {
+  if (!title) return Number.MAX_SAFE_INTEGER;
+  const match = title.trim().match(/^(\d+)/);
+  return match ? parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
+}
+
+async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
+  const toggledBooks = books.filter((b) => b.Toggled);
+  if (toggledBooks.length === 0) return [];
+
+  // BookID is cd.Z_PK as string
+  const bookIds = Array.from(
+    new Set(
+      toggledBooks
+        .map((b) => {
+          const n = parseInt(b.BookID, 10);
+          return Number.isFinite(n) ? n : null;
+        })
+        .filter((n): n is number => n !== null)
+    )
+  );
+  if (bookIds.length === 0) return [];
+
+  const db = sqlite(DB_PATH);
+  try {
+    const placeholders = bookIds.map(() => '?').join(', ');
+
+    const rows = db
+      .prepare(
+        `
+        SELECT
+          cd."Z_PK"                AS bookId,
+          cd."ZCOURSEID"           AS bookCourseId,
+          cd."ZREFERENCE"          AS bookRef,
+
+          chap."Z_PK"              AS chapterId,
+          chap."ZTITLE"            AS chapterTitle,
+          chap."ZPRODUCTREFERENCE" AS chapterRef,
+          issue."ZISSUEID"         AS issueId,
+
+          ex."Z_PK"                AS exerciseId,
+          ex."ZTITLE"              AS exerciseTitle,
+          ex."ZEXERCISEID"         AS exerciseCode,
+
+          q."Z_PK"                 AS questionId,
+          q."ZREFERENCE"           AS questionRef,
+          qd."ZTEXT_DECRYPTED"     AS questionText,
+
+          ans."Z_PK"               AS answerId,
+          ans."ZNUMBER"            AS answerNumber,
+          ans."ZANSWER_TEXT"       AS answerText,
+          ans."ZCORRECT_DECRYPTED" AS answerIsCorrect
+
+        FROM ZILPQUESTION_DECRYPTED qd
+        JOIN ZILPQUESTION q
+          ON q."Z_PK" = qd."Z_PK"
+
+        JOIN ZILPEXERCISE ex
+          ON ex."Z_PK" = q."ZEXERCISE"
+
+        JOIN ZILPISSUEDEF issue
+          ON issue."Z_PK" = ex."ZISSUE"
+
+        JOIN ZILPISSUEPRODUCT ip
+          ON ip."ZISSUEPRODUCT" = issue."ZISSUEPRODUCT"
+
+        JOIN ZILPEPRODUCT chap
+          ON chap."Z_PK" = ip."ZEPRODUCT"
+
+        JOIN ZILPCOURSEDEF cd
+          ON cd."Z_PK" = issue."ZCOURSE"
+
+        LEFT JOIN ZILPANSWER_DECRYPTED ans
+          ON ans."ZQUESTION" = q."Z_PK"
+         AND ans."ZTYPE" = 3
+
+        WHERE cd."Z_PK" IN (${placeholders})
+
+        ORDER BY
+          cd."ZCOURSEID",
+          chap."ZTITLE",
+          ex."ZEXERCISEID",
+          q."ZREFERENCE",
+          ans."ZNUMBER"
+        `
+      )
+      .all(...bookIds) as RawQuizRow[];
+
+    if (rows.length === 0) return [];
+
+    const booksMap = new Map<
+      number,
+      {
+        id: number;
+        courseId: string | null;
+        ref: string | null;
+        title: string;
+        chapters: Map<
+          number,
+          {
+            id: number;
+            title: string;
+            ref: string | null;
+            issueId: string | null;
+            questions: Map<
+              number,
+              {
+                id: number;
+                ref: string | null;
+                text: string;
+                exerciseTitle: string | null;
+                exerciseCode: string | null;
+                exerciseId: number;
+                answers: QuizAnswer[];
+              }
+            >;
+          }
+        >;
+      }
+    >();
+
+    for (const row of rows) {
+      // --- Book ---
+      let book = booksMap.get(row.bookId);
+      if (!book) {
+        const toggledBook = toggledBooks.find(
+          (b) => parseInt(b.BookID, 10) === row.bookId
+        );
+
+        const titleFromBook =
+          toggledBook?.Titel ||
+          toggledBook?.CourseName ||
+          toggledBook?.Refrence ||
+          `Buch ${row.bookId}`;
+
+        book = {
+          id: row.bookId,
+          courseId: row.bookCourseId,
+          ref: row.bookRef,
+          title: titleFromBook,
+          chapters: new Map(),
+        };
+        booksMap.set(row.bookId, book);
+      }
+
+      // --- Chapter ---
+      let chapter = book.chapters.get(row.chapterId);
+      if (!chapter) {
+        chapter = {
+          id: row.chapterId,
+          title:
+            row.chapterTitle ||
+            row.issueId ||
+            row.chapterRef ||
+            `Kapitel ${row.chapterId}`,
+          ref: row.chapterRef,
+          issueId: row.issueId,
+          questions: new Map(),
+        };
+        book.chapters.set(row.chapterId, chapter);
+      }
+
+      // --- Question ---
+      let question = chapter.questions.get(row.questionId);
+      if (!question) {
+        question = {
+          id: row.questionId,
+          ref: row.questionRef,
+          text: cleanQuizQuestionText(row.questionText),
+          exerciseTitle: row.exerciseTitle,
+          exerciseCode: row.exerciseCode,
+          exerciseId: row.exerciseId,
+          answers: [],
+        };
+        chapter.questions.set(row.questionId, question);
+      }
+
+      // --- Answer ---
+      if (row.answerId != null && row.answerNumber != null) {
+        question.answers.push({
+          id: row.answerId,
+          number: row.answerNumber,
+          text: cleanQuizAnswerText(row.answerText),
+          isCorrect:
+            row.answerIsCorrect == null
+              ? null
+              : row.answerIsCorrect === 1,
+        });
+      }
+    }
+
+    const quizBooks: QuizBook[] = Array.from(booksMap.values()).map(
+      (book) => {
+        const chapters: QuizChapter[] = Array.from(book.chapters.values())
+          .sort(
+            (a, b) =>
+              extractQuizChapterNumberPrefix(a.title) -
+              extractQuizChapterNumberPrefix(b.title)
+          )
+          .map((ch) => ({
+            id: ch.id,
+            title: ch.title,
+            ref: ch.ref,
+            issueId: ch.issueId,
+            questions: Array.from(ch.questions.values()).map((q) => ({
+              id: q.id,
+              ref: q.ref,
+              text: q.text,
+              exerciseTitle: q.exerciseTitle,
+              exerciseCode: q.exerciseCode,
+              exerciseId: q.exerciseId,
+              answers: q.answers
+                .slice()
+                .sort((a, b) => a.number - b.number),
+            })),
+          }));
+
+        return {
+          id: book.id,
+          courseId: book.courseId,
+          ref: book.ref,
+          title: book.title,
+          chapters,
+        };
+      }
+    );
+
+    // Optional debug: you can comment this out later
+    console.log(
+      'Quiz books for export:',
+      quizBooks.map((b) => ({
+        id: b.id,
+        title: b.title,
+        chapters: b.chapters.length,
+        questions: b.chapters.reduce(
+          (sum, ch) => sum + ch.questions.length,
+          0
+        ),
+      }))
+    );
+
+    return quizBooks;
+  } finally {
+    db.close();
+  }
+}
+
+async function appendQuizPagesToPdf(
+  pdfDoc: PDFDocument,
+  quizBooks: QuizBook[]
+): Promise<PDFDocument> {
+  if (!quizBooks || quizBooks.length === 0) {
+    return pdfDoc;
+  }
+
+  const bodyFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const margin = 50;
+  const sectionSpacing = 24;
+  const questionSpacing = 10;
+  const lineHeight = 14;
+
+  const questionFontSize = 11;
+  const answerFontSize = 10;
+  const titleFontSize = 16;
+  const chapterFontSize = 12;
+
+  const maxWidth = A4_WIDTH - 2 * margin;
+  const answerIndent = 20;
+
+  let page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
+  let y = A4_HEIGHT - margin;
+
+  const startNewPage = () => {
+    page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
+    y = A4_HEIGHT - margin;
+  };
+
+  for (const book of quizBooks) {
+    const bookTitle = book.title || 'Quiz';
+
+    // Book heading
+    if (y < margin + 3 * lineHeight) {
+      startNewPage();
+    }
+
+    page.drawText(`Quiz – ${bookTitle}`, {
+      x: margin,
+      y,
+      size: titleFontSize,
+      font: boldFont,
+    });
+    y -= sectionSpacing;
+
+    for (const chapter of book.chapters) {
+      if (!chapter.questions || chapter.questions.length === 0) continue;
+
+      // Chapter heading
+      if (y < margin + 3 * lineHeight) {
+        startNewPage();
+      }
+
+      const chapterTitle = chapter.title || 'Kapitel';
+
+      page.drawText(chapterTitle, {
+        x: margin,
+        y,
+        size: chapterFontSize,
+        font: boldFont,
+      });
+      y -= sectionSpacing;
+
+      let questionIndex = 1;
+
+      for (const question of chapter.questions) {
+        const questionLabel = `${questionIndex}. ${question.text || ''}`;
+        const questionLines = wrapText(
+          questionLabel,
+          maxWidth,
+          bodyFont,
+          questionFontSize
+        );
+
+        for (const line of questionLines) {
+          if (y < margin + 2 * lineHeight) {
+            startNewPage();
+          }
+          page.drawText(line, {
+            x: margin,
+            y,
+            size: questionFontSize,
+            font: bodyFont,
+          });
+          y -= lineHeight;
+        }
+
+        const answers = question.answers || [];
+        for (let i = 0; i < answers.length; i++) {
+          const answer = answers[i];
+          const letter = String.fromCharCode(65 + i); // A,B,C,...
+
+          const answerText = `${letter}) ${answer.text || ''}`;
+          const answerLines = wrapText(
+            answerText,
+            maxWidth - answerIndent,
+            bodyFont,
+            answerFontSize
+          );
+
+          for (const line of answerLines) {
+            if (y < margin + 2 * lineHeight) {
+              startNewPage();
+            }
+            page.drawText(line, {
+              x: margin + answerIndent,
+              y,
+              size: answerFontSize,
+              font: bodyFont,
+            });
+            y -= lineHeight;
+          }
+        }
+
+        y -= questionSpacing;
+        questionIndex++;
+      }
+
+      y -= sectionSpacing; // gap between chapters
+    }
+
+    y -= sectionSpacing; // gap between books
+  }
+
+  return pdfDoc;
+}
+
+function wrapText(
+  text: string,
+  maxWidth: number,
+  font: PDFFont,
+  fontSize: number
+): string[] {
+  const words = (text || '').split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+
+    if (testWidth <= maxWidth) {
+      currentLine = testLine;
+    } else {
+      if (currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        // Single word longer than max width: hard-break by characters
+        let remaining = word;
+        while (remaining.length > 0) {
+          let low = 1;
+          let high = remaining.length;
+          let fitChars = 1;
+
+          while (low <= high) {
+            const mid = Math.floor((low + high) / 2);
+            const piece = remaining.slice(0, mid);
+            const w = font.widthOfTextAtSize(piece, fontSize);
+            if (w <= maxWidth) {
+              fitChars = mid;
+              low = mid + 1;
+            } else {
+              high = mid - 1;
+            }
+          }
+
+          lines.push(remaining.slice(0, fitChars));
+          remaining = remaining.slice(fitChars);
+        }
+        currentLine = '';
+      }
+    }
+  }
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  return lines.length ? lines : [''];
 }

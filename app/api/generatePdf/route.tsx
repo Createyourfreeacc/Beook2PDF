@@ -610,21 +610,26 @@ export async function generateMergedPdf(
     updatedTocData = tocData;
   }
 
-  // Phase 1: append non-interactive quiz pages at the very end
   let pdfDocWithQuiz = pdfDocWithToc;
   if (exportQuiz) {
     try {
       const quizBooks = await loadQuizDataForBooks(books);
       if (quizBooks.length > 0) {
-        pdfDocWithQuiz = await appendQuizPagesToPdf(pdfDocWithToc, quizBooks);
+        // append question pages
+        pdfDocWithQuiz = await appendQuizPagesToPdf(pdfDocWithQuiz, quizBooks);
+        // append solution pages
+        pdfDocWithQuiz = await appendQuizSolutionPagesToPdf(
+          pdfDocWithQuiz,
+          quizBooks
+        );
       }
     } catch (err) {
-      console.error('Failed to append quiz pages:', err);
+      console.error('Failed to append quiz pages / solutions:', err);
       // fail soft, keep main PDF
     }
   }
 
-  const PdfDoc = await addOutlineToPdf(pdfDocWithToc, updatedTocData);
+  const PdfDoc = await addOutlineToPdf(pdfDocWithQuiz, updatedTocData);
 
   setPhaseProgress(jobId, 'merge', 1);
   return await PdfDoc.save();
@@ -1858,20 +1863,6 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
       }
     );
 
-    // Optional debug: you can comment this out later
-    console.log(
-      'Quiz books for export:',
-      quizBooks.map((b) => ({
-        id: b.id,
-        title: b.title,
-        chapters: b.chapters.length,
-        questions: b.chapters.reduce(
-          (sum, ch) => sum + ch.questions.length,
-          0
-        ),
-      }))
-    );
-
     return quizBooks;
   } finally {
     db.close();
@@ -1891,10 +1882,10 @@ async function appendQuizPagesToPdf(
 
   const margin = 50;
   const sectionSpacing = 24;
-  const questionSpacing = 10;
-  const lineHeight = 14;
+  const questionSpacing = 6;
+  const lineHeight = 12;
 
-  const questionFontSize = 11;
+  const questionFontSize = 9;
   const answerFontSize = 10;
   const titleFontSize = 16;
   const chapterFontSize = 12;
@@ -1909,6 +1900,8 @@ async function appendQuizPagesToPdf(
     page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
     y = A4_HEIGHT - margin;
   };
+
+  const usablePageHeight = A4_HEIGHT - 2 * margin;
 
   for (const book of quizBooks) {
     const bookTitle = book.title || 'Quiz';
@@ -1955,8 +1948,46 @@ async function appendQuizPagesToPdf(
           questionFontSize
         );
 
+        const answers = question.answers || [];
+        const allAnswerLines: string[][] = [];
+        let totalAnswerLines = 0;
+
+        // Pre-wrap all answers once so we can compute total block height
+        for (let i = 0; i < answers.length; i++) {
+          const answer = answers[i];
+          const letter = String.fromCharCode(65 + i); // A, B, C, ...
+          const answerText = `${letter}) ${answer.text || ''}`;
+          const answerLines = wrapText(
+            answerText,
+            maxWidth - answerIndent,
+            bodyFont,
+            answerFontSize
+          );
+          allAnswerLines.push(answerLines);
+          totalAnswerLines += answerLines.length;
+        }
+
+        const questionLinesCount = questionLines.length;
+        const totalLinesForBlock = questionLinesCount + totalAnswerLines;
+        const blockHeight =
+          totalLinesForBlock * lineHeight + questionSpacing;
+
+        const availableHeight = y - margin;
+
+        // Decide whether we *try* to keep this question block together
+        const canFitOnFreshPage =
+          blockHeight <= usablePageHeight && blockHeight > 0;
+        const keepTogether = canFitOnFreshPage;
+
+        if (keepTogether && blockHeight > availableHeight) {
+          // Not enough room on this page – start the whole block on a fresh page
+          startNewPage();
+        }
+
+        // --- Draw question lines ---
         for (const line of questionLines) {
-          if (y < margin + 2 * lineHeight) {
+          // If we *can't* keep together, fall back to old per-line page break behavior
+          if (!keepTogether && y < margin + 2 * lineHeight) {
             startNewPage();
           }
           page.drawText(line, {
@@ -1968,21 +1999,10 @@ async function appendQuizPagesToPdf(
           y -= lineHeight;
         }
 
-        const answers = question.answers || [];
-        for (let i = 0; i < answers.length; i++) {
-          const answer = answers[i];
-          const letter = String.fromCharCode(65 + i); // A,B,C,...
-
-          const answerText = `${letter}) ${answer.text || ''}`;
-          const answerLines = wrapText(
-            answerText,
-            maxWidth - answerIndent,
-            bodyFont,
-            answerFontSize
-          );
-
+        // --- Draw answer lines ---
+        for (const answerLines of allAnswerLines) {
           for (const line of answerLines) {
-            if (y < margin + 2 * lineHeight) {
+            if (!keepTogether && y < margin + 2 * lineHeight) {
               startNewPage();
             }
             page.drawText(line, {
@@ -2061,4 +2081,169 @@ function wrapText(
   }
 
   return lines.length ? lines : [''];
+}
+
+async function appendQuizSolutionPagesToPdf(
+  pdfDoc: PDFDocument,
+  quizBooks: QuizBook[]
+): Promise<PDFDocument> {
+  if (!quizBooks || quizBooks.length === 0) {
+    return pdfDoc;
+  }
+
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const margin = 50;
+  const headerSpacing = 24;
+  const sectionSpacing = 20;
+  const solutionLineHeight = 12;
+
+  const titleFontSize = 16;
+  const chapterFontSize = 12;
+  const solutionFontSize = 10;
+
+  const maxWidth = A4_WIDTH - 2 * margin;
+  const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  // configurable number of solution columns
+  const numColumns = 3;
+  const columnGap = 20;
+  const columnWidth =
+    (maxWidth - columnGap * (numColumns - 1)) / numColumns;
+
+  let page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
+  let y = A4_HEIGHT - margin;
+
+  const drawBookHeader = (bookTitle: string) => {
+    page.drawText(`Lösungen – ${bookTitle}`, {
+      x: margin,
+      y,
+      size: titleFontSize,
+      font: boldFont,
+    });
+    y -= headerSpacing;
+  };
+
+  const drawChapterHeader = (chapterTitle: string) => {
+    page.drawText(chapterTitle, {
+      x: margin,
+      y,
+      size: chapterFontSize,
+      font: boldFont,
+    });
+    y -= sectionSpacing;
+  };
+
+  const startNewPage = (
+    bookTitle?: string,
+    chapterTitle?: string
+  ) => {
+    page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
+    y = A4_HEIGHT - margin;
+
+    if (bookTitle) {
+      drawBookHeader(bookTitle);
+    }
+    if (chapterTitle) {
+      drawChapterHeader(chapterTitle);
+    }
+  };
+
+  for (const book of quizBooks) {
+    const bookTitle = book.title || 'Quiz';
+
+    // Book heading
+    if (y < margin + 3 * solutionLineHeight) {
+      startNewPage(bookTitle);
+    } else {
+      drawBookHeader(bookTitle);
+    }
+
+    for (const chapter of book.chapters) {
+      const questions = chapter.questions || [];
+      if (questions.length === 0) continue;
+
+      const chapterTitle = chapter.title || 'Kapitel';
+
+      if (y < margin + 3 * solutionLineHeight) {
+        startNewPage(bookTitle, chapterTitle);
+      } else {
+        drawChapterHeader(chapterTitle);
+      }
+
+      let rowY = y;
+      let colIndex = 0;
+      let questionIndex = 1;
+
+      const finishRowIfNeeded = () => {
+        if (colIndex !== 0) {
+          rowY -= solutionLineHeight;
+          colIndex = 0;
+        }
+      };
+
+      for (const question of questions) {
+        const answers = (question.answers || [])
+          .slice()
+          .sort((a, b) => a.number - b.number);
+
+        let label: string;
+
+        if (!answers.length) {
+          label = `${questionIndex}. –`;
+        } else {
+          const correctIndex = answers.findIndex(
+            (a) => a.isCorrect === true
+          );
+
+          if (correctIndex === -1) {
+            label = `${questionIndex}. –`;
+          } else {
+            const letter =
+              LETTERS[correctIndex] ??
+              `#${answers[correctIndex].number}`;
+            // number + letter only
+            label = `${questionIndex}. ${letter}`;
+          }
+        }
+
+        // page break if no vertical room for another row
+        if (rowY < margin + solutionLineHeight) {
+          startNewPage(bookTitle, chapterTitle);
+          rowY = y;
+          colIndex = 0;
+        }
+
+        const x =
+          margin + colIndex * (columnWidth + columnGap);
+
+        // Bold number + letter, in 3 columns across
+        page.drawText(label, {
+          x,
+          y: rowY,
+          size: solutionFontSize,
+          font: boldFont,
+        });
+
+        colIndex++;
+        if (colIndex >= numColumns) {
+          colIndex = 0;
+          rowY -= solutionLineHeight;
+        }
+
+        questionIndex++;
+      }
+
+      // move down after last partially filled row
+      finishRowIfNeeded();
+
+      // gap before next chapter
+      y = rowY - sectionSpacing;
+    }
+
+    // gap between books
+    y -= sectionSpacing;
+  }
+
+  return pdfDoc;
 }

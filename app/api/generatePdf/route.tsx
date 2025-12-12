@@ -106,7 +106,8 @@ type QuizBook = {
   id: number;               // cd.Z_PK
   courseId: string | null;  // cd.ZCOURSEID
   ref: string | null;       // cd.ZREFERENCE
-  title: string;            // nice label from your Book object
+  title: string;            // nice label taken from your Book object
+  lang?: string | null;     // language code
   chapters: QuizChapter[];
 };
 
@@ -1872,6 +1873,7 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
         courseId: string | null;
         ref: string | null;
         title: string;
+        lang: string;
         chapters: Map<
           number,
           {
@@ -1914,11 +1916,17 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
           row.bookRef ||
           `Buch ${row.bookId}`;
 
+        // NEW: derive language, default DE
+        let lang = (toggledBook as any)?.Lang;
+        if (typeof lang !== 'string') lang = 'DE';
+        lang = lang.trim().toUpperCase();
+
         book = {
           id: row.bookId,
           courseId: row.bookCourseId,
           ref: row.bookRef,
           title: finalTitle,
+          lang,
           chapters: new Map(),
         };
         booksMap.set(row.bookId, book);
@@ -2082,6 +2090,7 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
           courseId: book.courseId,
           ref: book.ref,
           title: book.title,
+          lang: book.lang,
           chapters,
         };
       }
@@ -2180,15 +2189,43 @@ async function appendQuizPagesToPdf(
   const imageCache = new Map<number, any>();
 
   for (const book of quizBooks) {
-    const bookTitle = normalizePdfText(book.title || 'Quiz');
+    const rawBookTitle = book.title || 'Quiz';
+
+    // language detection
+    let lang = (book as any)?.lang || (book as any)?.Lang || 'DE';
+    if (typeof lang !== 'string') lang = 'DE';
+    lang = lang.trim().toUpperCase();
+
+    let quizLabel: string;
+    switch (lang) {
+      case 'EN':
+        quizLabel = 'Quiz';
+        break;
+      case 'FR':
+        quizLabel = 'Quiz';
+        break;
+      case 'ES':
+        quizLabel = 'Cuestionario';
+        break;
+      case 'IT':
+        quizLabel = 'Quiz';
+        break;
+      case 'DE':
+      default:
+        quizLabel = 'Quiz';
+        break;
+    }
+
+    const headerText = rawBookTitle
+      ? `${quizLabel} – ${rawBookTitle}`
+      : quizLabel;
 
     if (y < margin + 3 * lineHeight) {
       startNewPage();
     }
 
     // Book heading
-    //TODO: Localize
-    page.drawText(`Quiz – ${bookTitle}`, {
+    page.drawText(normalizePdfText(headerText), {
       x: margin,
       y,
       size: titleFontSize,
@@ -2262,13 +2299,39 @@ async function appendQuizPagesToPdf(
           y -= imageGap;
         }
 
-        //TODO: Localize
-        const caption =
-          group.questionNumbers && group.questionNumbers.length
-            ? `Material für Fragen ${formatQuestionNumbers(
-                group.questionNumbers
-              )}`
-            : 'Material für mehrere Fragen';
+        let caption: string;
+        const formattedNums = group.questionNumbers && group.questionNumbers.length
+          ? formatQuestionNumbers(group.questionNumbers)
+          : '';
+
+        switch (lang) {
+          case 'EN':
+            caption = formattedNums
+              ? `Material for questions ${formattedNums}`
+              : 'Material for multiple questions';
+            break;
+          case 'FR':
+            caption = formattedNums
+              ? `Matériel pour les questions ${formattedNums}`
+              : 'Matériel pour plusieurs questions';
+            break;
+          case 'ES':
+            caption = formattedNums
+              ? `Material para las preguntas ${formattedNums}`
+              : 'Material para varias preguntas';
+            break;
+          case 'IT':
+            caption = formattedNums
+              ? `Materiale per le domande ${formattedNums}`
+              : 'Materiale per più domande';
+            break;
+          case 'DE':
+          default:
+            caption = formattedNums
+              ? `Material für Fragen ${formattedNums}`
+              : 'Material für mehrere Fragen';
+            break;
+        }
 
         const captionLines = wrapText(
           normalizePdfText(caption),
@@ -2512,17 +2575,39 @@ async function appendQuizSolutionPagesToPdf(
   let page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
   let y = A4_HEIGHT - margin;
 
+  let currentLang: string = 'DE';
+
   const drawBookHeader = (bookTitle: string) => {
-    page.drawText(
-      //TODO: Localize
-      normalizePdfText(`Lösungen – ${bookTitle}`),
-      {
-        x: margin,
-        y,
-        size: titleFontSize,
-        font: boldFont,
-      }
-    );
+    let headerLabel: string;
+    switch (currentLang) {
+      case 'EN':
+        headerLabel = 'Solutions';
+        break;
+      case 'FR':
+        headerLabel = 'Solutions';
+        break;
+      case 'ES':
+        headerLabel = 'Soluciones';
+        break;
+      case 'IT':
+        headerLabel = 'Soluzioni';
+        break;
+      case 'DE':
+      default:
+        headerLabel = 'Lösungen';
+        break;
+    }
+
+    const fullTitle = bookTitle
+      ? `${headerLabel} – ${bookTitle}`
+      : headerLabel;
+
+    page.drawText(normalizePdfText(fullTitle), {
+      x: margin,
+      y,
+      size: titleFontSize,
+      font: boldFont,
+    });
     y -= headerSpacing;
   };
 
@@ -2553,6 +2638,10 @@ async function appendQuizSolutionPagesToPdf(
 
   for (const book of quizBooks) {
     const bookTitle = book.title || 'Quiz';
+
+    let lang = (book as any)?.lang || (book as any)?.Lang || 'DE';
+    if (typeof lang !== 'string') lang = 'DE';
+    currentLang = lang.trim().toUpperCase();
 
     if (y < margin + 3 * solutionLineHeight) {
       startNewPage(bookTitle);

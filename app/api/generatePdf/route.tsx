@@ -19,6 +19,7 @@ import { setProgress, setPhaseProgress } from '@/lib/progressStore';
 import { getResolvedPaths } from '@/lib/config';
 import fs from 'fs';
 import path from 'path';
+import CryptoJS from 'crypto-js';
 
 const { dbPath: DB_PATH } = getResolvedPaths();
 
@@ -671,15 +672,14 @@ export async function generateMergedPdf(
   let pdfDocWithQuiz = pdfDocWithToc;
   if (exportQuiz) {
     try {
+      setPhaseProgress(jobId, 'quiz-decrypt', 0);
+      await ensureQuizDecryptedTablesForExport(books);
+      setPhaseProgress(jobId, 'quiz-decrypt', 1);
+
       const quizBooks = await loadQuizDataForBooks(books);
       if (quizBooks.length > 0) {
-        // append question pages
         pdfDocWithQuiz = await appendQuizPagesToPdf(pdfDocWithQuiz, quizBooks);
-        // append solution pages
-        pdfDocWithQuiz = await appendQuizSolutionPagesToPdf(
-          pdfDocWithQuiz,
-          quizBooks
-        );
+        pdfDocWithQuiz = await appendQuizSolutionPagesToPdf(pdfDocWithQuiz, quizBooks);
       }
     } catch (err) {
       console.error('Failed to append quiz pages / solutions:', err);
@@ -2730,4 +2730,279 @@ async function appendQuizSolutionPagesToPdf(
   return pdfDoc;
 }
 
+// ==========================================================================
+// QUIZ DECRYPT (export-side)
+// Ensures ZILPQUESTION_DECRYPTED + ZILPANSWER_DECRYPTED exist + are populated
+// for the currently exported issues.
+// Reuses logic from /api/quiz/decrypt, but scopes work to selected issues.
+// ==========================================================================
 
+const QUIZ_KEY_STRING = 'fdäK?s^dw-+ç,W!El';
+const QUIZ_IV_STRING = '/D}$2al!';
+
+function decryptStoredQA(stored: string) {
+  if (!stored || stored.length <= 3) return { idString: null as string | null, plaintext: null as string | null };
+
+  const base64Payload = stored.substring(3);
+
+  try {
+    const key = CryptoJS.enc.Utf8.parse(QUIZ_KEY_STRING.substring(0, 8));
+    const iv = CryptoJS.enc.Utf8.parse(QUIZ_IV_STRING);
+
+    const decrypted = CryptoJS.DES.decrypt(
+      { ciphertext: CryptoJS.enc.Base64.parse(base64Payload) },
+      key,
+      { iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
+    );
+
+    const text = decrypted.toString(CryptoJS.enc.Utf8);
+    if (!text) return { idString: null, plaintext: null };
+
+    const idx = text.indexOf(':');
+    if (idx === -1) return { idString: null, plaintext: text };
+
+    return { idString: text.substring(0, idx), plaintext: text.substring(idx + 1) };
+  } catch {
+    return { idString: null, plaintext: null };
+  }
+}
+
+function parseDecryptedAnswerPayload(plaintext: string | null): {
+  isCorrect: number | null;
+  letter: string | null;
+  text: string | null;
+} {
+  if (!plaintext) return { isCorrect: null, letter: null, text: null };
+
+  const trimmed = plaintext.trim();
+  const match = /^([01])=([a-zA-Z])\)\s*(.*)$/.exec(trimmed);
+
+  if (!match) {
+    return { isCorrect: null, letter: null, text: trimmed.length ? trimmed : null };
+  }
+
+  const [, flag, letter, rest] = match;
+  return {
+    isCorrect: flag === '1' ? 1 : 0,
+    letter,
+    text: rest.trim().length ? rest.trim() : null,
+  };
+}
+
+function ensureTableExistsFromBase(db: any, decryptedTable: string, baseTable: string) {
+  const exists = !!db
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`)
+    .get(decryptedTable);
+
+  if (!exists) {
+    db.exec(`CREATE TABLE ${decryptedTable} AS SELECT * FROM ${baseTable} WHERE 0;`);
+  }
+}
+
+function ensureColumn(db: any, table: string, colDefSql: string) {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${colDefSql};`);
+  } catch {
+    // ignore "duplicate column" errors
+  }
+}
+
+function getBaseColumnNames(db: any, baseTable: string): string[] {
+  const info = db.prepare(`PRAGMA table_info(${baseTable})`).all() as any[];
+  return info.map((c) => c.name).filter(Boolean);
+}
+
+async function ensureQuizDecryptedTablesForExport(books: Book[]) {
+  // Only decrypt for issues we actually export
+  const issueIds = Array.from(
+    new Set(
+      books
+        .filter((b) => b.Toggled)
+        .flatMap((b) => b.Issue)
+        .map((n) => Number(n))
+        .filter((n) => Number.isFinite(n))
+    )
+  );
+
+  if (issueIds.length === 0) return { ok: true, issues: 0, updatedQuestions: 0, updatedAnswers: 0 };
+
+  // open writable (needed to create/populate decrypted tables)
+  const db = sqlite(DB_PATH, { readonly: false });
+
+  try {
+    // Guard: base tables must exist
+    const hasAnswer = !!db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='ZILPANSWER'`)
+      .get();
+    const hasQuestion = !!db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='ZILPQUESTION'`)
+      .get();
+
+    if (!hasAnswer || !hasQuestion) {
+      return { ok: false, issues: issueIds.length, error: 'Missing ZILPANSWER or ZILPQUESTION base tables.' };
+    }
+
+    // Ensure decrypted tables exist (don’t wipe them)
+    ensureTableExistsFromBase(db, 'ZILPANSWER_DECRYPTED', 'ZILPANSWER');
+    ensureTableExistsFromBase(db, 'ZILPQUESTION_DECRYPTED', 'ZILPQUESTION');
+
+    // Ensure required decrypted columns exist
+    ensureColumn(db, 'ZILPANSWER_DECRYPTED', 'ZTEXT_DECRYPTED TEXT');
+    ensureColumn(db, 'ZILPANSWER_DECRYPTED', 'ZIDSTRING TEXT');
+    ensureColumn(db, 'ZILPANSWER_DECRYPTED', 'ZCORRECT_DECRYPTED INTEGER');
+    ensureColumn(db, 'ZILPANSWER_DECRYPTED', 'ZANSWER_LETTER TEXT');
+    ensureColumn(db, 'ZILPANSWER_DECRYPTED', 'ZANSWER_TEXT TEXT');
+
+    ensureColumn(db, 'ZILPQUESTION_DECRYPTED', 'ZTEXT_DECRYPTED TEXT');
+    ensureColumn(db, 'ZILPQUESTION_DECRYPTED', 'ZIDSTRING TEXT');
+
+    const placeholders = issueIds.map(() => '?').join(', ');
+
+    // ---- QUESTIONS (scoped by issue) ----
+    // Delete existing decrypted rows for these issues so we can refresh cleanly
+    db.prepare(
+      `
+      DELETE FROM ZILPQUESTION_DECRYPTED
+      WHERE Z_PK IN (
+        SELECT q."Z_PK"
+        FROM ZILPQUESTION q
+        JOIN ZILPEXERCISE ex ON ex."Z_PK" = q."ZEXERCISE"
+        WHERE ex."ZISSUE" IN (${placeholders})
+      )
+      `
+    ).run(...issueIds);
+
+    const qColNames = getBaseColumnNames(db, 'ZILPQUESTION');
+    const qBaseCols = qColNames.join(', ');
+    const qPlaceholders = qColNames.map((n) => `@${n}`).join(', ') + ', @ZTEXT_DECRYPTED, @ZIDSTRING';
+
+    const qInsert = db.prepare(
+      `INSERT INTO ZILPQUESTION_DECRYPTED (${qBaseCols}, ZTEXT_DECRYPTED, ZIDSTRING) VALUES (${qPlaceholders})`
+    );
+
+    const qRows = db
+      .prepare(
+        `
+        SELECT q.*
+        FROM ZILPQUESTION q
+        JOIN ZILPEXERCISE ex ON ex."Z_PK" = q."ZEXERCISE"
+        WHERE ex."ZISSUE" IN (${placeholders})
+        `
+      )
+      .all(...issueIds) as any[];
+
+    let updatedQuestions = 0;
+
+    const qTx = db.transaction((rows: any[]) => {
+      for (const row of rows) {
+        const raw = typeof row.ZTEXT === 'string' ? row.ZTEXT : null;
+
+        let ZTEXT_DECRYPTED: string | null = null;
+        let ZIDSTRING: string | null = null;
+
+        if (raw && (raw.startsWith('AT$') || raw.startsWith('QT$'))) {
+          const { idString, plaintext } = decryptStoredQA(raw);
+          if (plaintext != null) {
+            ZTEXT_DECRYPTED = plaintext;
+            ZIDSTRING = idString;
+          }
+        } else if (raw) {
+          // fallback: some rows might not be prefixed; keep plaintext so joins still work
+          ZTEXT_DECRYPTED = raw;
+        }
+
+        qInsert.run({ ...row, ZTEXT_DECRYPTED, ZIDSTRING });
+        updatedQuestions++;
+      }
+    });
+
+    qTx(qRows);
+
+    // ---- ANSWERS (scoped by issue) ----
+    db.prepare(
+      `
+      DELETE FROM ZILPANSWER_DECRYPTED
+      WHERE Z_PK IN (
+        SELECT a."Z_PK"
+        FROM ZILPANSWER a
+        JOIN ZILPQUESTION q ON q."Z_PK" = a."ZQUESTION"
+        JOIN ZILPEXERCISE ex ON ex."Z_PK" = q."ZEXERCISE"
+        WHERE ex."ZISSUE" IN (${placeholders})
+      )
+      `
+    ).run(...issueIds);
+
+    const aColNames = getBaseColumnNames(db, 'ZILPANSWER');
+    const aBaseCols = aColNames.join(', ');
+    const aPlaceholders =
+      aColNames.map((n) => `@${n}`).join(', ') +
+      ', @ZTEXT_DECRYPTED, @ZIDSTRING, @ZCORRECT_DECRYPTED, @ZANSWER_LETTER, @ZANSWER_TEXT';
+
+    const aInsert = db.prepare(
+      `INSERT INTO ZILPANSWER_DECRYPTED (${aBaseCols}, ZTEXT_DECRYPTED, ZIDSTRING, ZCORRECT_DECRYPTED, ZANSWER_LETTER, ZANSWER_TEXT)
+       VALUES (${aPlaceholders})`
+    );
+
+    const aRows = db
+      .prepare(
+        `
+        SELECT a.*
+        FROM ZILPANSWER a
+        JOIN ZILPQUESTION q ON q."Z_PK" = a."ZQUESTION"
+        JOIN ZILPEXERCISE ex ON ex."Z_PK" = q."ZEXERCISE"
+        WHERE ex."ZISSUE" IN (${placeholders})
+        `
+      )
+      .all(...issueIds) as any[];
+
+    let updatedAnswers = 0;
+
+    const aTx = db.transaction((rows: any[]) => {
+      for (const row of rows) {
+        const raw = typeof row.ZTEXT === 'string' ? row.ZTEXT : null;
+
+        let ZTEXT_DECRYPTED: string | null = null;
+        let ZIDSTRING: string | null = null;
+        let ZCORRECT_DECRYPTED: number | null = null;
+        let ZANSWER_LETTER: string | null = null;
+        let ZANSWER_TEXT: string | null = null;
+
+        if (raw && (raw.startsWith('AT$') || raw.startsWith('QT$'))) {
+          const { idString, plaintext } = decryptStoredQA(raw);
+          if (plaintext != null) {
+            ZTEXT_DECRYPTED = plaintext;
+            ZIDSTRING = idString;
+
+            const parsed = parseDecryptedAnswerPayload(plaintext);
+            ZCORRECT_DECRYPTED = parsed.isCorrect;
+            ZANSWER_LETTER = parsed.letter;
+            ZANSWER_TEXT = parsed.text;
+          }
+        } else if (raw) {
+          ZTEXT_DECRYPTED = raw;
+          const parsed = parseDecryptedAnswerPayload(raw);
+          ZCORRECT_DECRYPTED = parsed.isCorrect;
+          ZANSWER_LETTER = parsed.letter;
+          ZANSWER_TEXT = parsed.text;
+        }
+
+        aInsert.run({
+          ...row,
+          ZTEXT_DECRYPTED,
+          ZIDSTRING,
+          ZCORRECT_DECRYPTED,
+          ZANSWER_LETTER,
+          ZANSWER_TEXT,
+        });
+
+        updatedAnswers++;
+      }
+    });
+
+    aTx(aRows);
+
+    return { ok: true, issues: issueIds.length, updatedQuestions, updatedAnswers };
+  } finally {
+    db.close();
+  }
+}

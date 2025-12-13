@@ -670,6 +670,8 @@ export async function generateMergedPdf(
   }
 
   let pdfDocWithQuiz = pdfDocWithToc;
+  let tocDataAfterQuiz = updatedTocData;
+
   if (exportQuiz) {
     try {
       setPhaseProgress(jobId, 'quiz-decrypt', 0);
@@ -678,17 +680,27 @@ export async function generateMergedPdf(
 
       const quizBooks = await loadQuizDataForBooks(books);
       if (quizBooks.length > 0) {
-        pdfDocWithQuiz = await appendQuizPagesToPdf(pdfDocWithQuiz, quizBooks);
-        pdfDocWithQuiz = await appendQuizSolutionPagesToPdf(pdfDocWithQuiz, quizBooks);
+        setPhaseProgress(jobId, 'quiz-insert', 0);
+
+        const result = await insertQuizAndSolutionsAtEndOfEachBook(
+          pdfDocWithQuiz,
+          tocDataAfterQuiz,
+          books,
+          quizBooks
+        );
+
+        pdfDocWithQuiz = result.pdfDoc;
+        tocDataAfterQuiz = result.updatedTocData;
+
+        setPhaseProgress(jobId, 'quiz-insert', 1);
       }
     } catch (err) {
-      console.error('Failed to append quiz pages / solutions:', err);
+      console.error('Failed to insert quiz pages / solutions:', err);
       // fail soft, keep main PDF
     }
   }
 
-  const PdfDoc = await addOutlineToPdf(pdfDocWithQuiz, updatedTocData);
-
+  const PdfDoc = await addOutlineToPdf(pdfDocWithQuiz, tocDataAfterQuiz);
   setPhaseProgress(jobId, 'merge', 1);
   return await PdfDoc.save();
 }
@@ -3006,3 +3018,495 @@ async function ensureQuizDecryptedTablesForExport(books: Book[]) {
     db.close();
   }
 }
+
+function getMinPdfPageOfBookGroup(group: MergedTOCEntry[] | undefined): number | null {
+  if (!group || group.length === 0) return null;
+
+  let min = Number.POSITIVE_INFINITY;
+  for (const [pdfPage] of group) {
+    const p = Number(pdfPage);
+    if (Number.isFinite(p) && p > 0 && p < min) min = p;
+  }
+  return min === Number.POSITIVE_INFINITY ? null : min;
+}
+
+function findInsertBeforeForBookEnd(
+  tocData: MergedTOCEntry[][],
+  bookIdx: number,
+  pageCount: number
+): number {
+  // Insert before the next book's first page (based on TOC groups)
+  for (let j = bookIdx + 1; j < tocData.length; j++) {
+    const nextStart = getMinPdfPageOfBookGroup(tocData[j]);
+    if (nextStart != null) return nextStart;
+  }
+  // Last book -> append to end
+  return pageCount + 1;
+}
+
+function shiftTocDataForBooksAfter(
+  tocData: MergedTOCEntry[][],
+  fromBookIdxExclusive: number,
+  deltaPages: number
+) {
+  if (!deltaPages) return;
+
+  for (let b = fromBookIdxExclusive + 1; b < tocData.length; b++) {
+    const group = tocData[b];
+    if (!group) continue;
+
+    for (const entry of group) {
+      entry[0] += deltaPages;
+    }
+  }
+}
+
+async function insertQuizAndSolutionsAtEndOfEachBook(
+  pdfDoc: PDFDocument,
+  tocData: MergedTOCEntry[][],
+  books: Book[],
+  quizBooks: QuizBook[]
+): Promise<{ pdfDoc: PDFDocument; updatedTocData: MergedTOCEntry[][] }> {
+  const toggledBooks = books.filter((b) => b.Toggled);
+  const groupCount = Math.min(toggledBooks.length, tocData.length);
+  if (groupCount === 0) return { pdfDoc, updatedTocData: tocData };
+
+  // Map quiz book by cd.Z_PK (which matches Book.BookID in your UI list)
+  const quizByBookId = new Map<number, QuizBook>();
+  for (const qb of quizBooks) quizByBookId.set(qb.id, qb);
+
+  // Reuse embedded fonts + image cache across all inserted quiz pages
+  const fonts = await getUnicodeFonts(pdfDoc);
+  const imageCache = new Map<number, any>();
+
+  for (let bookIdx = 0; bookIdx < groupCount; bookIdx++) {
+    const uiBook = toggledBooks[bookIdx];
+    const bookId = parseInt(uiBook.BookID, 10);
+    if (Number.isNaN(bookId)) continue;
+
+    const quizBook = quizByBookId.get(bookId);
+    if (!quizBook) continue; // no quiz for this book -> no insertion, no shifting
+
+    const insertBefore1Based = findInsertBeforeForBookEnd(
+      tocData,
+      bookIdx,
+      pdfDoc.getPageCount()
+    );
+    const insertIndex0Based = insertBefore1Based - 1;
+
+    const insertedPages = await insertQuizAndSolutionsForSingleBookAtIndex(
+      pdfDoc,
+      quizBook,
+      insertIndex0Based,
+      fonts,
+      imageCache
+    );
+
+    if (insertedPages > 0) {
+      // shift TOC for all subsequent books so outlines remain correct
+      shiftTocDataForBooksAfter(tocData, bookIdx, insertedPages);
+    }
+  }
+
+  return { pdfDoc, updatedTocData: tocData };
+}
+
+async function insertQuizAndSolutionsForSingleBookAtIndex(
+  pdfDoc: PDFDocument,
+  book: QuizBook,
+  insertIndex0Based: number,
+  fonts: { bodyFont: PDFFont; boldFont: PDFFont },
+  imageCache: Map<number, any>
+): Promise<number> {
+  const { bodyFont, boldFont } = fonts;
+
+  // Only include chapters with questions
+  const chapters = (book.chapters || []).filter((c) => (c.questions || []).length > 0);
+  if (chapters.length === 0) return 0;
+
+  // ---------- shared layout ----------
+  const margin = 50;
+  const sectionSpacing = 24;
+  const questionSpacing = 6;
+  const lineHeight = 12;
+
+  const questionFontSize = 9;
+  const answerFontSize = 10;
+  const titleFontSize = 16;
+  const chapterFontSize = 12;
+
+  const maxTextWidth = A4_WIDTH - 2 * margin;
+  const answerIndent = 20;
+  const imageGap = 8;
+  const usablePageHeight = A4_HEIGHT - 2 * margin;
+
+  let inserted = 0;
+  let cursorInsertIndex = insertIndex0Based;
+
+  const insertNewPage = () => {
+    const p = pdfDoc.insertPage(cursorInsertIndex, [A4_WIDTH, A4_HEIGHT]);
+    cursorInsertIndex += 1;
+    inserted += 1;
+    return p;
+  };
+
+  // language detection
+  let lang = (book as any)?.lang || (book as any)?.Lang || 'DE';
+  if (typeof lang !== 'string') lang = 'DE';
+  lang = lang.trim().toUpperCase();
+
+  let quizLabel: string;
+  switch (lang) {
+    case 'ES': quizLabel = 'Cuestionario'; break;
+    default: quizLabel = 'Quiz'; break;
+  }
+
+  // ============================================================
+  // PART A) QUIZ PAGES (end-of-book)
+  // ============================================================
+  let page = insertNewPage();
+  let y = A4_HEIGHT - margin;
+
+  const headerText = book.title ? `${quizLabel} – ${book.title}` : quizLabel;
+
+  page.drawText(normalizePdfText(headerText), {
+    x: margin,
+    y,
+    size: titleFontSize,
+    font: boldFont,
+  });
+  y -= sectionSpacing;
+
+  for (const chapter of chapters) {
+    if (y < margin + 3 * lineHeight) {
+      page = insertNewPage();
+      y = A4_HEIGHT - margin;
+    }
+
+    const chapterTitle = normalizePdfText(chapter.title || 'Kapitel');
+
+    page.drawText(chapterTitle, {
+      x: margin,
+      y,
+      size: chapterFontSize,
+      font: boldFont,
+    });
+    y -= sectionSpacing;
+
+    // 1) Shared assets (chapter-level)
+    const sharedGroups = chapter.sharedAssets || [];
+    for (const group of sharedGroups) {
+      const pages = group.pages || [];
+      for (const asset of pages) {
+        const image = await embedQuizImage(pdfDoc, asset, imageCache);
+        if (!image) continue;
+
+        const maxImageWidth = maxTextWidth;
+        const maxImageHeight = usablePageHeight * 0.6;
+
+        const scale = Math.min(
+          maxImageWidth / image.width,
+          maxImageHeight / image.height,
+          1
+        );
+
+        const drawWidth = image.width * scale;
+        const drawHeight = image.height * scale;
+
+        if (y - drawHeight < margin) {
+          page = insertNewPage();
+          y = A4_HEIGHT - margin;
+        }
+
+        const xImg = margin + (maxTextWidth - drawWidth) / 2;
+        y -= drawHeight;
+
+        page.drawImage(image, {
+          x: xImg,
+          y,
+          width: drawWidth,
+          height: drawHeight,
+        });
+
+        y -= imageGap;
+      }
+
+      const formattedNums =
+        group.questionNumbers && group.questionNumbers.length
+          ? formatQuestionNumbers(group.questionNumbers)
+          : '';
+
+      let caption: string;
+      switch (lang) {
+        case 'EN':
+          caption = formattedNums
+            ? `Material for questions ${formattedNums}`
+            : 'Material for multiple questions';
+          break;
+        case 'ES':
+          caption = formattedNums
+            ? `Material para las preguntas ${formattedNums}`
+            : 'Material para varias preguntas';
+          break;
+        default:
+          caption = formattedNums
+            ? `Material für Fragen ${formattedNums}`
+            : 'Material für mehrere Fragen';
+          break;
+      }
+
+      const captionLines = wrapText(
+        normalizePdfText(caption),
+        maxTextWidth,
+        bodyFont,
+        questionFontSize
+      );
+
+      for (const line of captionLines) {
+        if (y < margin + 2 * lineHeight) {
+          page = insertNewPage();
+          y = A4_HEIGHT - margin;
+        }
+        page.drawText(line, {
+          x: margin,
+          y,
+          size: questionFontSize,
+          font: bodyFont,
+        });
+        y -= lineHeight;
+      }
+
+      y -= sectionSpacing;
+    }
+
+    // 2) Questions + per-question assets
+    let questionIndex = 1;
+    for (const question of chapter.questions || []) {
+      const questionLabel = `${questionIndex}. ${normalizePdfText(question.text || '')}`;
+      const questionLines = wrapText(
+        questionLabel,
+        maxTextWidth,
+        bodyFont,
+        questionFontSize
+      );
+
+      const answers = question.answers || [];
+      const allAnswerLines: string[][] = [];
+      let totalAnswerLines = 0;
+
+      for (let i = 0; i < answers.length; i++) {
+        const answer = answers[i];
+        const letter = String.fromCharCode(65 + i); // A,B,...
+        const answerText = `${letter}) ${normalizePdfText(answer.text || '')}`;
+        const answerLines = wrapText(
+          answerText,
+          maxTextWidth - answerIndent,
+          bodyFont,
+          answerFontSize
+        );
+        allAnswerLines.push(answerLines);
+        totalAnswerLines += answerLines.length;
+      }
+
+      const totalLinesForBlock = questionLines.length + totalAnswerLines;
+      const blockHeight = totalLinesForBlock * lineHeight + questionSpacing;
+      const availableHeight = y - margin;
+      const canFitOnFreshPage = blockHeight <= usablePageHeight && blockHeight > 0;
+      const keepTogether = canFitOnFreshPage;
+
+      if (keepTogether && blockHeight > availableHeight) {
+        page = insertNewPage();
+        y = A4_HEIGHT - margin;
+      }
+
+      for (const line of questionLines) {
+        if (!keepTogether && y < margin + 2 * lineHeight) {
+          page = insertNewPage();
+          y = A4_HEIGHT - margin;
+        }
+        page.drawText(line, {
+          x: margin,
+          y,
+          size: questionFontSize,
+          font: bodyFont,
+        });
+        y -= lineHeight;
+      }
+
+      for (const answerLines of allAnswerLines) {
+        for (const line of answerLines) {
+          if (!keepTogether && y < margin + 2 * lineHeight) {
+            page = insertNewPage();
+            y = A4_HEIGHT - margin;
+          }
+          page.drawText(line, {
+            x: margin + answerIndent,
+            y,
+            size: answerFontSize,
+            font: bodyFont,
+          });
+          y -= lineHeight;
+        }
+      }
+
+      y -= questionSpacing;
+
+      // Question-specific assets
+      for (const asset of question.assets || []) {
+        const image = await embedQuizImage(pdfDoc, asset, imageCache);
+        if (!image) continue;
+
+        const maxImageWidth = maxTextWidth;
+        const maxImageHeight = usablePageHeight * 0.6;
+
+        const scale = Math.min(
+          maxImageWidth / image.width,
+          maxImageHeight / image.height,
+          1
+        );
+
+        const drawWidth = image.width * scale;
+        const drawHeight = image.height * scale;
+
+        if (y - drawHeight < margin) {
+          page = insertNewPage();
+          y = A4_HEIGHT - margin;
+        }
+
+        const xImg = margin + (maxTextWidth - drawWidth) / 2;
+        y -= drawHeight;
+
+        page.drawImage(image, {
+          x: xImg,
+          y,
+          width: drawWidth,
+          height: drawHeight,
+        });
+
+        y -= imageGap;
+      }
+
+      y -= sectionSpacing / 2;
+      questionIndex++;
+    }
+
+    y -= sectionSpacing;
+  }
+
+  // ============================================================
+  // PART B) SOLUTIONS PAGES (immediately after quiz pages)
+  // ============================================================
+  page = insertNewPage();
+  y = A4_HEIGHT - margin;
+
+  let solutionsLabel: string;
+  switch (lang) {
+    case 'EN': solutionsLabel = 'Solutions'; break;
+    case 'ES': solutionsLabel = 'Soluciones'; break;
+    default: solutionsLabel = 'Lösungen'; break;
+  }
+
+  const solutionsHeader = book.title ? `${solutionsLabel} – ${book.title}` : solutionsLabel;
+
+  page.drawText(normalizePdfText(solutionsHeader), {
+    x: margin,
+    y,
+    size: 16,
+    font: boldFont,
+  });
+  y -= 24;
+
+  const solutionLineHeight = 12;
+  const solutionFontSize = 10;
+  const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  const maxWidth = A4_WIDTH - 2 * margin;
+  const numColumns = 3;
+  const columnGap = 20;
+  const columnWidth = (maxWidth - columnGap * (numColumns - 1)) / numColumns;
+
+  const startSolutionsPage = (chapterTitle?: string) => {
+    page = insertNewPage();
+    y = A4_HEIGHT - margin;
+
+    page.drawText(normalizePdfText(solutionsHeader), {
+      x: margin,
+      y,
+      size: 16,
+      font: boldFont,
+    });
+    y -= 24;
+
+    if (chapterTitle) {
+      page.drawText(normalizePdfText(chapterTitle), {
+        x: margin,
+        y,
+        size: 12,
+        font: boldFont,
+      });
+      y -= 20;
+    }
+  };
+
+  for (const chapter of chapters) {
+    const chapterTitle = chapter.title || 'Kapitel';
+
+    if (y < margin + 3 * solutionLineHeight) {
+      startSolutionsPage(chapterTitle);
+    } else {
+      page.drawText(normalizePdfText(chapterTitle), {
+        x: margin,
+        y,
+        size: 12,
+        font: boldFont,
+      });
+      y -= 20;
+    }
+
+    let rowY = y;
+    let colIndex = 0;
+    let qIdx = 1;
+
+    for (const question of chapter.questions || []) {
+      const answers = (question.answers || []).slice().sort((a, b) => a.number - b.number);
+      let label: string;
+
+      const correctIndex = answers.findIndex((a) => a.isCorrect === true);
+      if (correctIndex === -1) {
+        label = `${qIdx}. –`;
+      } else {
+        const letter = LETTERS[correctIndex] ?? `#${answers[correctIndex].number}`;
+        label = `${qIdx}. ${letter}`;
+      }
+
+      if (rowY < margin + solutionLineHeight) {
+        startSolutionsPage(chapterTitle);
+        rowY = y;
+        colIndex = 0;
+      }
+
+      const x = margin + colIndex * (columnWidth + columnGap);
+      page.drawText(normalizePdfText(label), {
+        x,
+        y: rowY,
+        size: solutionFontSize,
+        font: boldFont,
+      });
+
+      colIndex++;
+      if (colIndex >= numColumns) {
+        colIndex = 0;
+        rowY -= solutionLineHeight;
+      }
+
+      qIdx++;
+    }
+
+    // move y forward for next chapter
+    if (colIndex !== 0) rowY -= solutionLineHeight;
+    y = rowY - 20;
+  }
+
+  return inserted;
+}
+

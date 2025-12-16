@@ -67,7 +67,7 @@ export default function BookReader() {
     const [isProgressVisible, setIsProgressVisible] = useState(false);
     const [progressClient, setProgressClient] = useState(0);
     const [muteEvent, setMuteEvent] = useState(false);
-    const [tocHtml, setTocHtml] = useState<{ id: string; content: string }[]>([]);
+    const [tocHtml, setTocHtml] = useState<{ id: string; content: JSX.Element }[]>([]);
     const pageIframeSrc = useMemo(() => buildIframeSrc(content), [content]);
     const [jobId, setJobId] = useState<string | null>(null);
     const [currentProfile, setCurrentProfile] = useState<string>('');
@@ -513,6 +513,7 @@ export default function BookReader() {
                             <Label htmlFor="exportQuiz">Export quiz</Label>
                         </div>
 
+                        {/* TODO: add feature
                         <div className="flex items-center gap-2">
                             <Checkbox
                                 id="exportMyQuiz"
@@ -520,7 +521,7 @@ export default function BookReader() {
                                 onCheckedChange={(checked) => setExportMyQuiz(!!checked)}
                             />
                             <Label htmlFor="exportMyQuiz">Export my quiz</Label>
-                        </div>
+                        </div>*/}
                     </div>
                     <div className="flex flex-row gap-2">
                         <div className="inline-block">
@@ -557,19 +558,19 @@ export default function BookReader() {
 
                         <div className="flex flex-col flex-1 h-full">
                             {/* TODO: BUG: TocBar doesn't update properly the first time (is shown for 1 sec and then disappears, when site updates
-                               for example because of a download start, it showns properly )*/}
+                               for example because of a download start, it showns properly ), was this comment meant for orderbar?*/}
                             <TocBar
                                 items={orderBarItems.map(item => {
                                     const tocEntry = tocHtml.find(t => t.id === item.id);
+                                    const book = books.find(b => b.BookID === item.id);
 
                                     return {
-                                        ...item,
+                                        id: item.id,
+                                        title: book?.Titel || book?.CourseName || "(Unknown book)",
                                         content: tocEntry?.content || <div>No TOC available</div>,
-                                        /* TODO: READ LANGUAGE OF BOOK AN CHANGE TITLE ACCRODINGLY*/
-                                        toggled: books.find(b => b.BookID === item.id)?.Toggled || false
+                                        toggled: book?.Toggled || false,
                                     };
                                 })}
-                                onToggle={toggleSingleBook}
                             />
                         </div>
                     </div>

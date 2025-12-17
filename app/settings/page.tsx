@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTheme } from "next-themes";
+import { Laptop, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +26,8 @@ type ProfileInfo = {
 };
 
 export default function ContentPage() {
+  const { theme, setTheme } = useTheme();
+  const currentTheme = (theme ?? "system") as "light" | "dark" | "system";
   const [miscDecryptStatus, setMiscDecryptStatus] = useState<string | null>(null);
   const [beookDir, setBeookDir] = useState<string>("");
   const [selectedProfile, setSelectedProfile] = useState<string>("");
@@ -173,6 +177,48 @@ export default function ContentPage() {
   return (
     <div className="space-y-6">
       <Card>
+        <CardContent className="space-y-2">
+          <Label>Theme</Label>
+          <Select value={currentTheme} onValueChange={setTheme}>
+            <SelectTrigger className="w-[220px]">
+              <div className="flex items-center gap-2">
+                {currentTheme === "light" ? (
+                  <Sun className="h-4 w-4" />
+                ) : currentTheme === "dark" ? (
+                  <Moon className="h-4 w-4" />
+                ) : (
+                  <Laptop className="h-4 w-4" />
+                )}
+                <span className="capitalize">{currentTheme}</span>
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="light">
+                  <span className="flex items-center gap-2">
+                    <Sun className="h-4 w-4" />
+                    Light
+                  </span>
+                </SelectItem>
+                <SelectItem value="dark">
+                  <span className="flex items-center gap-2">
+                    <Moon className="h-4 w-4" />
+                    Dark
+                  </span>
+                </SelectItem>
+                <SelectItem value="system">
+                  <span className="flex items-center gap-2">
+                    <Laptop className="h-4 w-4" />
+                    System
+                  </span>
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader>
           <CardTitle>Beook Configuration</CardTitle>
           <CardDescription>
@@ -222,9 +268,7 @@ export default function ContentPage() {
           )}
         </CardContent>
       </Card>
-
-      <Separator />
-
+      
       <Card>
         <CardHeader>
           <CardTitle>Misc Decryption</CardTitle>

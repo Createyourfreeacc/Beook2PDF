@@ -27,7 +27,12 @@ type ProfileInfo = {
 
 export default function ContentPage() {
   const { theme, setTheme } = useTheme();
-  const currentTheme = (theme ?? "system") as "light" | "dark" | "system";
+  const [themeMounted, setThemeMounted] = useState(false);
+  // Avoid hydration mismatch: next-themes reads the persisted theme on the client,
+  // but SSR must render a deterministic value.
+  const currentTheme = (
+    (themeMounted ? theme : "system") ?? "system"
+  ) as "light" | "dark" | "system";
   const [miscDecryptStatus, setMiscDecryptStatus] = useState<string | null>(null);
   const [beookDir, setBeookDir] = useState<string>("");
   const [selectedProfile, setSelectedProfile] = useState<string>("");
@@ -40,6 +45,7 @@ export default function ContentPage() {
 
   // Load current config on mount
   useEffect(() => {
+    setThemeMounted(true);
     loadConfigAndProfiles();
   }, []);
 

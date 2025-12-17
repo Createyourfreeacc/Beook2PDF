@@ -1,6 +1,6 @@
 "use client"
 
-import { Book, Home, Notebook, NotebookPen, Settings } from "lucide-react"
+import { Book, Download, Home, Notebook, NotebookPen, Settings } from "lucide-react"
 
 import {
   Sidebar,
@@ -14,13 +14,8 @@ import {
 
 const items = [
   {
-    title: "Home",
-    url: "/",
-    icon: Home,
-  },
-  {
     title: "Book",
-    url: "/book-reader",
+    url: "/",
     icon: Book,
   },
   {

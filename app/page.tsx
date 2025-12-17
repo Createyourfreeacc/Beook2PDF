@@ -169,8 +169,10 @@ export default function BookReader() {
         const getBooks = async () => {
             if (!currentProfile) return;
             if (noBooks) {
+                // If this profile has no books, make sure related UI state is cleared
                 setBooks([]);
                 setOrderBarItems([]);
+                setTocHtml([]);
                 return;
             }
             try {
@@ -234,7 +236,7 @@ export default function BookReader() {
             }
         };
         fetchMaxPage();
-    }, [currentProfile]);
+    }, [currentProfile, noBooks]);
 
     useEffect(() => {
         // Fetch TOC Entries Dynamically
@@ -252,11 +254,13 @@ export default function BookReader() {
             }
         };
 
-        // Trigger TOC Fetch on MaxPage Change
-        if (maxPage > 0) {
+        // Trigger TOC Fetch on MaxPage / books change
+        if (!noBooks && maxPage > 0 && books.length > 0) {
             fetchTOCEntries();
+        } else if (noBooks) {
+            setTocHtml([]);
         }
-    }, [books]);
+    }, [books, maxPage, noBooks]);
 
     //TODO remove log
     useEffect(() => {
@@ -448,7 +452,7 @@ export default function BookReader() {
         }
         if (!currentProfile) return;
         loadIframe();
-    }, [currentPage, currentProfile]);
+    }, [currentPage, currentProfile, noBooks]);
 
     const nextPage = async () => {
         const nextValidPage = await findValidPage(currentPage + 1, 'next');

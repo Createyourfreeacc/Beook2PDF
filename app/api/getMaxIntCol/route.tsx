@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
 import { getResolvedPaths } from '@/lib/config';
 
+const { dbPath: DB_PATH } = getResolvedPaths();
+
 export async function GET(request: Request) {
-    const { dbPath: DB_PATH } = getResolvedPaths();
     const searchParams = new URL(request.url).searchParams;
     const col = searchParams.get('col')?.toString();
     const table = searchParams.get('table')?.toString();

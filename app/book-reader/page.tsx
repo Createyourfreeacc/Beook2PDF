@@ -70,10 +70,7 @@ export default function BookReader() {
     const [tocHtml, setTocHtml] = useState<{ id: string; content: JSX.Element }[]>([]);
     const pageIframeSrc = useMemo(() => buildIframeSrc(content), [content]);
     const [jobId, setJobId] = useState<string | null>(null);
-    const [beookPath, setBeookPath] = useState<string>('');
-    const [currentProfile, setCurrentProfile] = useState<string>('1');
-    const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([]);
-    const [profileSaving, setProfileSaving] = useState<boolean>(false);
+    const [currentProfile, setCurrentProfile] = useState<string>('');
     const [books, setBooks] = useState<Book[]>([]);
     const [orderBarItems, setOrderBarItems] = useState<{ id: string; content: JSX.Element }[]>([]); // TODO: maybe remove, books already beeing reordered, only here for img
     const [downloadError, setDownloadError] = useState(false);
@@ -90,65 +87,6 @@ export default function BookReader() {
     useEffect(() => {
         muteEventRef.current = muteEvent;
     }, [muteEvent]);
-
-    useEffect(() => {
-        const loadConfigAndProfiles = async () => {
-            let cfgBeookPath = "";
-            let cfgProfileId = "1";
-
-            try {
-                const res = await fetch("/api/config");
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    cfgBeookPath = String(data.config.beookPath ?? "");
-                    cfgProfileId = String(data.config.profileId ?? "1");
-                    setBeookPath(cfgBeookPath);
-                    setCurrentProfile(cfgProfileId);
-                }
-            } catch (e) {
-                console.error("Failed to load config:", e);
-            }
-
-            try {
-                const res = await fetch("/api/profiles");
-                const data = await res.json();
-                if (res.ok && data.success && Array.isArray(data.profiles)) {
-                    const nextProfiles = data.profiles as { id: string; name: string }[];
-                    setProfiles(nextProfiles);
-
-                    // Self-heal: if saved profile is not a "real" profile (empty ZILPUSER),
-                    // pick the first available (prefer "1") and persist it.
-                    if (nextProfiles.length > 0 && !nextProfiles.some((p) => p.id === cfgProfileId)) {
-                        const fallback = nextProfiles.find((p) => p.id === "1")?.id ?? nextProfiles[0].id;
-                        if (cfgBeookPath.trim()) {
-                            try {
-                                const saveRes = await fetch("/api/config", {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ beookPath: cfgBeookPath, profileId: fallback }),
-                                });
-                                const saveData = await saveRes.json();
-                                if (saveRes.ok && saveData.success) {
-                                    setCurrentProfile(fallback);
-                                }
-                            } catch (e) {
-                                console.error("Failed to persist fallback profile:", e);
-                            }
-                        } else {
-                            setCurrentProfile(fallback);
-                        }
-                    }
-                } else {
-                    setProfiles([]);
-                }
-            } catch (e) {
-                console.error("Failed to load profiles:", e);
-                setProfiles([]);
-            }
-        };
-
-        loadConfigAndProfiles();
-    }, []);
 
     useEffect(() => {
         const jobId = crypto.randomUUID();
@@ -516,58 +454,18 @@ export default function BookReader() {
                         className="transition duration-700 ease-in-out ..." /><span className="text-sm">{progressClient}%</span></>
                     }
                 </div>
-                <Select
-                    value={currentProfile}
-                    onValueChange={async (nextProfile) => {
-                        try {
-                            setProfileSaving(true);
-
-                            let bp = beookPath;
-                            if (!bp) {
-                                try {
-                                    const res = await fetch("/api/config");
-                                    const data = await res.json();
-                                    if (res.ok && data.success) {
-                                        bp = data.config.beookPath || "";
-                                        setBeookPath(bp);
-                                    }
-                                } catch { }
-                            }
-
-                            if (!bp.trim()) {
-                                console.error("Missing beookPath. Set it in Settings first.");
-                                return;
-                            }
-
-                            // Persist selection so all API routes use the right DB.
-                            await fetch("/api/config", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                    beookPath: bp,
-                                    profileId: nextProfile,
-                                }),
-                            });
-                            setCurrentProfile(nextProfile);
-                        } catch (e) {
-                            console.error("Failed to save profile:", e);
-                        } finally {
-                            setProfileSaving(false);
-                        }
-                    }}
-                    disabled={profileSaving || profiles.length === 0}
-                >
+                <Select>
                     <SelectTrigger className="w-[180px]">
                         <SelectValue placeholder="Select a Profile" />
                     </SelectTrigger>
                     <SelectContent>
                         <SelectGroup>
                             <SelectLabel>Profiles</SelectLabel>
-                            {profiles.map((p) => (
-                                <SelectItem key={p.id} value={p.id}>
-                                    {p.name}
-                                </SelectItem>
-                            ))}
+                            <SelectItem value="apple">Apple</SelectItem>
+                            <SelectItem value="banana">Banana</SelectItem>
+                            <SelectItem value="blueberry">Blueberry</SelectItem>
+                            <SelectItem value="grapes">Grapes</SelectItem>
+                            <SelectItem value="pineapple">Pineapple</SelectItem>
                         </SelectGroup>
                     </SelectContent>
                 </Select>

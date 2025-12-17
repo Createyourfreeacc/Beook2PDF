@@ -52,6 +52,7 @@ export const dynamic = "force-dynamic";
 
 
 import { getResolvedPaths } from '@/lib/config';
+const { dbPath: DB_PATH } = getResolvedPaths();
 
 // ==========================================================================
 // CRYPTO CONSTANTS — FROM ILPBookSettingsHelper (decompiled)
@@ -175,7 +176,6 @@ function parseDecryptedAnswerPayload(plaintext: string | null): {
 // ZILPANSWER_DECRYPTED and ZILPQUESTION_DECRYPTED.
 // ==========================================================================
 export async function GET() {
-  const { dbPath: DB_PATH } = getResolvedPaths();
   let db: Database.Database;
 
   try {

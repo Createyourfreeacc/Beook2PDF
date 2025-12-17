@@ -3,9 +3,11 @@ import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import { getResolvedPaths } from '@/lib/config';
 
+const { dbPath: DB_PATH } = getResolvedPaths();
+
 async function getDb() {
   const db = await open({
-    filename: getResolvedPaths().dbPath,
+    filename: DB_PATH,
     driver: sqlite3.Database,
   });
   await db.run(`PRAGMA foreign_keys = ON;`);

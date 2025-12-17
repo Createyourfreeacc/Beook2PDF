@@ -6,27 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
-type Profile = {
-  id: string;
-  name: string;
-};
 
 export default function ContentPage() {
   const [miscDecryptStatus, setMiscDecryptStatus] = useState<string | null>(null);
-  const [beookPath, setBeookPath] = useState<string>("");
-  const [profileId, setProfileId] = useState<string>("1");
-  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [dbPath, setDbPath] = useState<string>("");
+  const [imgPath, setImgPath] = useState<string>("");
   const [resolvedDbPath, setResolvedDbPath] = useState<string>("");
+  const [resolvedImgPath, setResolvedImgPath] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -43,13 +29,10 @@ export default function ContentPage() {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        const cfgBeookPath = String(data.config.beookPath ?? "");
-        const cfgProfileId = String(data.config.profileId ?? "1");
-
-        setBeookPath(cfgBeookPath);
-        setProfileId(cfgProfileId);
+        setDbPath(data.config.dbPath);
+        setImgPath(data.config.imgPath);
         setResolvedDbPath(data.resolved.dbPath);
-        await loadProfiles(cfgBeookPath, cfgProfileId);
+        setResolvedImgPath(data.resolved.imgPath);
       } else {
         setMessage({ type: "error", text: "Failed to load config" });
       }
@@ -61,47 +44,6 @@ export default function ContentPage() {
     }
   }
 
-  async function loadProfiles(cfgBeookPath?: string, cfgProfileId?: string) {
-    try {
-      const res = await fetch("/api/profiles");
-      const data = await res.json();
-      if (res.ok && data.success && Array.isArray(data.profiles)) {
-        const nextProfiles: Profile[] = data.profiles;
-        setProfiles(nextProfiles);
-
-        // Self-heal: if the currently selected profile is not a "real" profile (e.g. empty ZILPUSER),
-        // pick the first available profile (prefer "1") and persist it.
-        const current = String(cfgProfileId ?? profileId ?? "1");
-        if (nextProfiles.length > 0 && !nextProfiles.some((p) => p.id === current)) {
-          const fallback = nextProfiles.find((p) => p.id === "1")?.id ?? nextProfiles[0].id;
-          setProfileId(fallback);
-
-          const bp = String(cfgBeookPath ?? beookPath ?? "").trim();
-          if (bp) {
-            try {
-              const saveRes = await fetch("/api/config", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ beookPath: bp, profileId: fallback }),
-              });
-              const saveData = await saveRes.json();
-              if (saveRes.ok && saveData.success) {
-                setResolvedDbPath(saveData.resolved.dbPath);
-              }
-            } catch (e) {
-              console.error("Failed to persist fallback profile:", e);
-            }
-          }
-        }
-      } else {
-        setProfiles([]);
-      }
-    } catch (err) {
-      console.error(err);
-      setProfiles([]);
-    }
-  }
-
   async function saveConfig() {
     try {
       setSaving(true);
@@ -110,7 +52,7 @@ export default function ContentPage() {
       const res = await fetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ beookPath, profileId }),
+        body: JSON.stringify({ dbPath, imgPath }),
       });
 
       const data = await res.json();
@@ -118,7 +60,7 @@ export default function ContentPage() {
       if (res.ok && data.success) {
         setMessage({ type: "success", text: data.message || "Config saved successfully" });
         setResolvedDbPath(data.resolved.dbPath);
-        await loadProfiles(beookPath, profileId);
+        setResolvedImgPath(data.resolved.imgPath);
       } else {
         setMessage({ type: "error", text: data.error || "Failed to save config" });
       }
@@ -144,11 +86,11 @@ export default function ContentPage() {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setBeookPath(data.config.beookPath);
-        setProfileId(String(data.config.profileId ?? "1"));
+        setDbPath(data.config.dbPath);
+        setImgPath(data.config.imgPath);
         setResolvedDbPath(data.resolved.dbPath);
+        setResolvedImgPath(data.resolved.imgPath);
         setMessage({ type: "success", text: data.message || "Config reset to defaults" });
-        await loadProfiles(data.config.beookPath, String(data.config.profileId ?? "1"));
       } else {
         setMessage({ type: "error", text: data.error || "Failed to reset config" });
       }
@@ -188,7 +130,7 @@ export default function ContentPage() {
         <CardHeader>
           <CardTitle>Path Configuration</CardTitle>
           <CardDescription>
-            Point to your Beook base folder (you can use {"${username}"} as a placeholder). The app resolves the SQLite DB and assets from it.
+            Configure the database and image paths used by the application. You can use {"${username}"} as a placeholder for the current Windows username.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -197,37 +139,35 @@ export default function ContentPage() {
           ) : (
             <>
               <div className="space-y-2">
-                <Label htmlFor="beookPath">Beook Folder</Label>
+                <Label htmlFor="dbPath">Database Path</Label>
                 <Input
-                  id="beookPath"
-                  value={beookPath}
-                  onChange={(e) => setBeookPath(e.target.value)}
-                  placeholder="C:/Users/${username}/AppData/Roaming/ionesoft/beook"
+                  id="dbPath"
+                  value={dbPath}
+                  onChange={(e) => setDbPath(e.target.value)}
+                  placeholder="C:/Users/${username}/AppData/Roaming/..."
                   disabled={saving}
                 />
+                {resolvedDbPath && (
+                  <p className="text-xs text-muted-foreground">
+                    Resolved: <span className="font-mono">{resolvedDbPath}</span>
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
-                <Label>Profile</Label>
-                <Select
-                  value={profileId}
-                  onValueChange={(v) => setProfileId(v)}
-                  disabled={saving || loading || profiles.length === 0}
-                >
-                  <SelectTrigger className="w-[260px]">
-                    <SelectValue placeholder="Select a Profile" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectLabel>Profiles</SelectLabel>
-                      {profiles.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="imgPath">Image Path</Label>
+                <Input
+                  id="imgPath"
+                  value={imgPath}
+                  onChange={(e) => setImgPath(e.target.value)}
+                  placeholder="C:/Users/${username}/AppData/Roaming/..."
+                  disabled={saving}
+                />
+                {resolvedImgPath && (
+                  <p className="text-xs text-muted-foreground">
+                    Resolved: <span className="font-mono">{resolvedImgPath}</span>
+                  </p>
+                )}
               </div>
 
               {message && (

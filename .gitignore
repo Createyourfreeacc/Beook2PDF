@@ -2,3 +2,4 @@ node_modules/
 .next/
 .cursor/
 tools/GlobalKeystoreDump.class
+config.json

@@ -6,11 +6,13 @@ A Windows application that exports content from the DRM-protected Beook e-learni
 
 ## Features
 
-- Extracts raw HTML/CSS content from the Beook SQLite database
-- Converts book pages to PDF using Puppeteer
-- Decrypts quiz questions and answers
-- Browse and select books from your Beook library
-- Modern web-based interface built with Next.js
+### Core Functionality
+- **Book Export**: Extracts raw HTML, CSS and fonts from the Beook database and converts pages to PDF
+- **Multi-Book Support**: Select and export multiple books in a single PDF with customizable ordering
+- **Table of Contents**: Automatic TOC generation with optional dedicated TOC pages
+- **Quiz Integration**: Decrypts and exports quiz questions and answers directly into PDFs
+- **Interactive Quiz Viewer**: Browse and practice quizzes with solution checking
+- **Custom Quiz Management**: Create and manage your own quiz questions
 
 ## Requirements
 
@@ -28,6 +30,8 @@ npm install
 
 ## Usage
 
+### Web Application
+
 Start the development server:
 
 ```bash
@@ -36,31 +40,15 @@ npm run dev
 
 Then open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### Configuration
+### Desktop Application (Electron)
 
-The application looks for the Beook database at the default location:
+Run the Electron wrapper:
 
+```bash
+npm run electron
 ```
-C:/Users/{username}/AppData/Roaming/ionesoft/beook/release/profiles/2/data/beook_book_v6.sqlite
-```
 
-If your installation differs, you may need to update the path in the settings.
-
-## Technical Details
-
-### Encryption
-
-The Beook application uses multiple layers of encryption:
-
-**Keystore (`.global.keystore`)**
-- Java KeyStore via `java.security.KeyStore` API
-- JCEKS implementation with PBE (Password-Based Encryption)
-- Key derivation: MD5-based PBKDF
-- Cipher: TripleDES
-
-**Content Encryption (DESEncrypter)**
-- Algorithm: DES
-- 8-byte initialization vector
+Note: The Electron app currently connects to `http://localhost:3000`, so you'll need to run `npm run dev` in a separate terminal first.
 
 ## Tested Courses
 
@@ -83,9 +71,9 @@ This tool has been tested with the following learning materials:
 
 ## Known Limitations
 
-- Only tested with few learning materials
-- Quiz content is decrypted but not yet included in PDF output
-- PDF generation uses Puppeteer (may have performance implications for large books)
+- Only tested with a limited set of learning materials
+- PDF generation uses Puppeteer (may have performance implications for very large books)
+- Electron app requires manual server startup (not yet bundled as standalone executable)
 
 ## License
 This app, "Beook2Pdf", is an independent product and is not affiliated with Ionesoft, the publisher and developer of Beook. The use of the word "Beook" does not imply any official approval or partnership with Ionesoft.

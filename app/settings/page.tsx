@@ -55,7 +55,8 @@ export default function ContentPage() {
         const profRes = await fetch("/api/profiles");
         const profData = await profRes.json();
         if (profRes.ok && profData.success) {
-          setProfiles(profData.profiles || []);
+          const list = (profData.profiles || []) as ProfileInfo[];
+          setProfiles(list.filter((p) => p.selectable));
         } else {
           setProfiles([]);
         }
@@ -92,7 +93,8 @@ export default function ContentPage() {
         const profRes = await fetch("/api/profiles");
         const profData = await profRes.json();
         if (profRes.ok && profData.success) {
-          setProfiles(profData.profiles || []);
+          const list = (profData.profiles || []) as ProfileInfo[];
+          setProfiles(list.filter((p) => p.selectable));
         } else {
           setProfiles([]);
         }
@@ -130,7 +132,8 @@ export default function ContentPage() {
         const profRes = await fetch("/api/profiles");
         const profData = await profRes.json();
         if (profRes.ok && profData.success) {
-          setProfiles(profData.profiles || []);
+          const list = (profData.profiles || []) as ProfileInfo[];
+          setProfiles(list.filter((p) => p.selectable));
         } else {
           setProfiles([]);
         }
@@ -190,40 +193,7 @@ export default function ContentPage() {
                   placeholder="C:/Users/${username}/AppData/Roaming/ionesoft/beook"
                   disabled={saving}
                 />
-                {resolvedDbPath && (
-                  <p className="text-xs text-muted-foreground">
-                    DB: <span className="font-mono">{resolvedDbPath}</span>
-                  </p>
-                )}
-                {resolvedImgPath && (
-                  <p className="text-xs text-muted-foreground">
-                    Images: <span className="font-mono">{resolvedImgPath}</span>
-                  </p>
-                )}
               </div>
-
-              <div className="space-y-2">
-                <Label>Profile</Label>
-                <Select value={selectedProfile} onValueChange={setSelectedProfile}>
-                  <SelectTrigger className="w-[260px]">
-                    <SelectValue placeholder="Select a Profile" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectLabel>Profiles</SelectLabel>
-                      {(profiles.length ? profiles : [{ id: selectedProfile || "1", label: selectedProfile || "1", selectable: true }]).map((p) => (
-                        <SelectItem key={p.id} value={p.id} disabled={!p.selectable}>
-                          {p.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Profile folder <span className="font-mono">0</span> is a dummy and ignored. Profiles with an empty <span className="font-mono">ZILPUSER</span> table are disabled.
-                </p>
-              </div>
-
               {message && (
                 <div
                   className={`text-sm p-3 rounded-md ${

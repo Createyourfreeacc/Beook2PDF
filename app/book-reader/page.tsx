@@ -79,6 +79,7 @@ export default function BookReader() {
     const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
     const [profilesLoading, setProfilesLoading] = useState<boolean>(true);
     const [currentProfile, setCurrentProfile] = useState<string>('');
+    const [noBooks, setNoBooks] = useState<boolean>(false);
     const [books, setBooks] = useState<Book[]>([]);
     const [orderBarItems, setOrderBarItems] = useState<{ id: string; content: React.ReactNode }[]>([]); // TODO: maybe remove, books already beeing reordered, only here for img
     const [downloadError, setDownloadError] = useState(false);
@@ -115,11 +116,11 @@ export default function BookReader() {
                     ? (profData.profiles || [])
                     : [];
 
-                setProfiles(list);
+                const selectable = list.filter((p) => p.selectable);
+                setProfiles(selectable);
 
                 // If selected is not selectable, pick the first selectable profile
-                const selectable = list.filter((p) => p.selectable);
-                const selectedIsSelectable = list.some((p) => p.id === selected && p.selectable);
+                const selectedIsSelectable = selectable.some((p) => p.id === selected);
 
                 const effective = selectedIsSelectable
                     ? selected
@@ -167,6 +168,11 @@ export default function BookReader() {
     useEffect(() => {
         const getBooks = async () => {
             if (!currentProfile) return;
+            if (noBooks) {
+                setBooks([]);
+                setOrderBarItems([]);
+                return;
+            }
             try {
                 const response = await fetch(`/api/getBooks`);
                 if (!response.ok) {
@@ -203,6 +209,19 @@ export default function BookReader() {
         const fetchMaxPage = async () => {
             if (!currentProfile) return;
             try {
+                // If ZILPRESOURCE is empty, the profile has no downloaded books/resources.
+                // In that case, show a friendly message in the iframe instead of erroring.
+                const maxResPk = await fetchMaxIntCol("Z_PK", "ZILPRESOURCE");
+                if (!maxResPk.content || maxResPk.content <= 0) {
+                    setNoBooks(true);
+                    setError('');
+                    setMaxPage(1);
+                    setContent(buildNoBooksHtml());
+                    setLoading(false);
+                    return;
+                }
+
+                setNoBooks(false);
                 const maxTopic = await fetchMaxIntCol("ZTOPIC", "ZILPRESOURCE");
 
                 if (maxTopic.content > 0) {
@@ -421,6 +440,12 @@ export default function BookReader() {
 
     // main content loading logic
     useEffect(() => {
+        if (noBooks) {
+            setError('');
+            setContent(buildNoBooksHtml());
+            setLoading(false);
+            return;
+        }
         if (!currentProfile) return;
         loadIframe();
     }, [currentPage, currentProfile]);
@@ -666,15 +691,20 @@ export default function BookReader() {
 }
 
 const fetchContentAndSetSrc = async (pageNumber: number) => {
-    let htmlId = 0;
     const { content: resulthtmlId } = await fetchWebResources("Z_PK", "ZTOPIC", pageNumber, "ZILPRESOURCE");
-    htmlId = resulthtmlId;
+    const htmlId = typeof resulthtmlId === "number" ? resulthtmlId : parseInt(String(resulthtmlId || "0"), 10);
 
     // If HTML ID is valid, fetch the HTML; otherwise, set fetchedHtml to empty string
     let fetchedHtml = "";
-    if (htmlId !== null) {
+    if (Number.isFinite(htmlId) && htmlId > 0) {
         const { content: result } = await fetchWebResources("ZDATA", "Z_PK", htmlId, "ZILPRESOURCE");
         fetchedHtml = result;
+    }
+
+    if (!fetchedHtml) {
+        // Profile has no content for this page number (or no resources at all).
+        // Return a friendly minimal HTML so the iframe never hard-errors.
+        return buildNoBooksHtml();
     }
 
     // Process HTML to replace image sources with data URLs
@@ -752,6 +782,40 @@ const buildIframeSrc = (htmlContent: string) => {
     // Generate a URL for the Blob
     return URL.createObjectURL(blob);
 };
+
+function buildNoBooksHtml(): string {
+    return `
+    <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <style>
+          body {
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+            margin: 0;
+            padding: 24px;
+            background: white;
+            color: #111827;
+          }
+          .card {
+            max-width: 720px;
+            margin: 64px auto;
+            padding: 20px 18px;
+            border: 1px solid rgba(0,0,0,0.1);
+            border-radius: 12px;
+          }
+          h1 { font-size: 18px; margin: 0 0 6px 0; }
+          p { margin: 0; color: #4b5563; font-size: 14px; line-height: 1.4; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>There are no books</h1>
+          <p>This profile has no downloaded books/resources yet.</p>
+        </div>
+      </body>
+    </html>
+  `;
+}
 
 // fetch content from DB by ID return json
 const fetchWebResources = async (col1: string, col2: string, id: number, table: string) => {

@@ -133,10 +133,13 @@ export async function GET() {
       }
     }
 
+    // Hide non-selectable profiles entirely from the UI
+    const selectableProfiles = profiles.filter((p) => p.selectable);
+
     return NextResponse.json({
       success: true,
       selectedProfile,
-      profiles,
+      profiles: selectableProfiles,
     });
   } catch (e: any) {
     return NextResponse.json(

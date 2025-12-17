@@ -5,8 +5,6 @@ import { getResolvedPaths } from '@/lib/config';
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const { dbPath: DB_PATH } = getResolvedPaths();
-
 /**
  * GET /api/getChapters?bookRef=978-3-905036-95-4
  *
@@ -15,6 +13,7 @@ const { dbPath: DB_PATH } = getResolvedPaths();
  * the same join that is used in the quiz aggregation.
  */
 export async function GET(request: NextRequest) {
+  const { dbPath: DB_PATH } = getResolvedPaths();
   const searchParams = new URL(request.url).searchParams;
   const bookRef = searchParams.get("bookRef");
 

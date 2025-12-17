@@ -4,8 +4,6 @@ import path from 'path';
 import fs from 'fs';
 import { getResolvedPaths } from '@/lib/config';
 
-const { dbPath: DB_PATH, imgPath: IMG_PATH } = getResolvedPaths();
-
 function findFolderContainingFile(rootDir: string, filename: string): string | null {
     const subdirs = fs.readdirSync(rootDir);
     for (const subdir of subdirs) {
@@ -19,6 +17,7 @@ function findFolderContainingFile(rootDir: string, filename: string): string | n
 
 //TODO: actually fetch language from ZILPCOURSEDE ZLANGUAGECODE
 export async function GET(request: Request) {
+    const { dbPath: DB_PATH, imgPath: IMG_PATH } = getResolvedPaths();
     const TABLE_DEF = "ZILPCOURSEDEF";
     const TABLE_PRODUCT = "ZILPCOURSEPRODUCT";
     const INDEX_COL = "Z_PK";

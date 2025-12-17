@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
 import puppeteer from 'puppeteer';
+import type { Page as PuppeteerPage } from 'puppeteer';
 import {
   PDFDocument,
   PDFName,
@@ -20,8 +21,6 @@ import { getResolvedPaths } from '@/lib/config';
 import fs from 'fs';
 import path from 'path';
 import CryptoJS from 'crypto-js';
-
-const { dbPath: DB_PATH } = getResolvedPaths();
 
 // A4 size in PDF points (72 pt/inch)
 const A4_WIDTH = 595.28;
@@ -276,7 +275,7 @@ export async function GET(request: NextRequest) {
 
     setPhaseProgress(jobId, 'finalize', 1);
     await new Promise(res => setImmediate(res))
-    return new Response(mergedPdfBytes, {
+    return new Response(Buffer.from(mergedPdfBytes), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
@@ -295,7 +294,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function getMaxZPk(): Promise<number> {
-  const db = sqlite(DB_PATH);
+  const db = sqlite(getResolvedPaths().dbPath);
 
   const maxZPkSql = `SELECT COUNT(*) as maxZPk FROM ZILPRESOURCE WHERE Z_PK IS NOT NULL`;
   const maxZPkResult = db.prepare(maxZPkSql).get() as { maxZPk: number };
@@ -349,7 +348,7 @@ function embedFontsIntoCss(css: string): string {
   const idToDataUrl: Record<number, string> = {};
 
   try {
-    db = sqlite(DB_PATH);
+    db = sqlite(getResolvedPaths().dbPath);
 
     const stmt = db.prepare(
       `SELECT "ZDATA", "ZMEDIATYPE" FROM "ZILPRESOURCE" WHERE "Z_PK" = ?`
@@ -706,7 +705,7 @@ export async function generateMergedPdf(
 }
 
 async function processPage(
-  page: puppeteer.Page,
+  page: PuppeteerPage,
   htmlContent: string,
   index: number
 ): Promise<Buffer> {
@@ -784,13 +783,13 @@ const INDEX_COL = "Z_PK";
 const COL_NAME_MAP = ["ZDATA", "ZTOPIC", "Z_PK", "ZMEDIATYPE", "ZISSUE"];
 
 export async function fetchPaginatedData(offset: number, limit: number, maxZPk: number, zissueCondition: string): Promise<{
-  data: Record<string, { ZDATA: any; ZTOPIC: number }>;
+  data: Record<string, Record<string, any>>;
   pagination: { total: number; limit: number; offset: number; hasMore: boolean };
 }> {
   const allColumns = [INDEX_COL, ...COL_NAME_MAP];
 
   try {
-    const db = sqlite(DB_PATH);
+    const db = sqlite(getResolvedPaths().dbPath);
 
     const sql = `
       SELECT ${allColumns.map(col => `"${col}"`).join(', ')}
@@ -801,11 +800,11 @@ export async function fetchPaginatedData(offset: number, limit: number, maxZPk: 
     `;
 
     const statement = db.prepare(sql);
-    const rows = statement.all();
+    const rows = statement.all() as any[];
 
     const resultMap: Record<string, Record<string, any>> = {};
 
-    rows.forEach(row => {
+    rows.forEach((row: any) => {
       const key = row[INDEX_COL];
       const value: Record<string, any> = {};
 
@@ -844,7 +843,7 @@ export async function fetchPaginatedData(offset: number, limit: number, maxZPk: 
 
 export async function getTOCData(): Promise<TOCData[]> {
   try {
-    const db = sqlite(DB_PATH);
+    const db = sqlite(getResolvedPaths().dbPath);
 
     const statement = db.prepare(`
                 SELECT Z_PK, ZTITLE, ZPAGENUMBER, ZACCESSPATH, ZORDER, ZTOPICDEFINITION, ZISSUE, ZLEVEL
@@ -853,9 +852,9 @@ export async function getTOCData(): Promise<TOCData[]> {
                 ORDER BY Z_PK
             `);
 
-    const rows = statement.all();
+    const rows = statement.all() as any[];
 
-    const entries: TOCData[] = rows.map(row => ({
+    const entries: TOCData[] = rows.map((row: any) => ({
       zpk: row.Z_PK,
       title: row.ZTITLE,
       pagenum: row.ZPAGENUMBER,
@@ -1759,7 +1758,7 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
   }
   if (bookIds.length === 0) return [];
 
-  const db = sqlite(DB_PATH);
+  const db = sqlite(getResolvedPaths().dbPath);
   try {
     const placeholders = bookIds.map(() => '?').join(', ');
 
@@ -2839,7 +2838,7 @@ async function ensureQuizDecryptedTablesForExport(books: Book[]) {
   if (issueIds.length === 0) return { ok: true, issues: 0, updatedQuestions: 0, updatedAnswers: 0 };
 
   // open writable (needed to create/populate decrypted tables)
-  const db = sqlite(DB_PATH, { readonly: false });
+  const db = sqlite(getResolvedPaths().dbPath, { readonly: false });
 
   try {
     // Guard: base tables must exist

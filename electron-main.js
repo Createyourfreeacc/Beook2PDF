@@ -1,13 +1,12 @@
 // electron-main.js
 const { app, BrowserWindow } = require("electron");
-
-
+const path = require("path");
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     autoHideMenuBar: true,
-    icon: "C:\\Users\\pilot\\Desktop\\beook2pdf\\app\\favicon.ico",
+    icon: path.join(process.cwd(), "app", "favicon.ico"),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

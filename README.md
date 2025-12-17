@@ -2,7 +2,7 @@
 
 A Windows application that exports content from the DRM-protected Beook e-learning platform to PDF format.
 
-> 🛠️🚧⚠️ **Work in Progress** — This project is under active development and may not work for all users or configurations.
+> ⚠️ **Work in Progress** — This project is under active development and may not work for all users.
 
 ## Features
 

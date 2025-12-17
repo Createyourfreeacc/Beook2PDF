@@ -22,6 +22,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import TocBar from "@/components/toc-bar"
+import { useI18n } from "@/components/i18n-provider"
 
 //TODO:
 // ZILPRESOURCE -> ZTOPICDEFINITION & ZISSUE //how to figure out to whom a singe page in resource belongs use 
@@ -65,6 +66,7 @@ type ProfileInfo = {
 };
 
 export default function BookReader() {
+    const { t } = useI18n();
     const [content, setContent] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string>('');
@@ -218,7 +220,7 @@ export default function BookReader() {
                     setNoBooks(true);
                     setError('');
                     setMaxPage(1);
-                    setContent(buildNoBooksHtml());
+                    setContent(buildNoBooksHtml(t("bookReader.noBooks.title"), t("bookReader.noBooks.description")));
                     setLoading(false);
                     return;
                 }
@@ -431,13 +433,17 @@ export default function BookReader() {
 
     const loadIframe = async () => {
         try {
-            const completeHtml = await fetchContentAndSetSrc(currentPage);
+            const completeHtml = await fetchContentAndSetSrc(
+                currentPage,
+                t("bookReader.noBooks.title"),
+                t("bookReader.noBooks.description")
+            );
 
             setContent(completeHtml);
             setLoading(false);
         } catch (error) {
             console.error('Error fetching resources:', error);
-            setError('Failed to load content');
+            setError(t("bookReader.loadError"));
             setLoading(false);
         }
     };
@@ -446,13 +452,13 @@ export default function BookReader() {
     useEffect(() => {
         if (noBooks) {
             setError('');
-            setContent(buildNoBooksHtml());
+            setContent(buildNoBooksHtml(t("bookReader.noBooks.title"), t("bookReader.noBooks.description")));
             setLoading(false);
             return;
         }
         if (!currentProfile) return;
         loadIframe();
-    }, [currentPage, currentProfile, noBooks]);
+    }, [currentPage, currentProfile, noBooks, t]);
 
     const nextPage = async () => {
         const nextValidPage = await findValidPage(currentPage + 1, 'next');
@@ -473,11 +479,11 @@ export default function BookReader() {
     };
 
     if (loading) {
-        return <div>Loading...</div>;
+        return <div>{t("common.loading")}</div>;
     }
 
     if (error) {
-        return <div>Error: {error}</div>;
+        return <div>{t("common.error")}: {error}</div>;
     }
 
     // generate a PDF serverside
@@ -527,7 +533,7 @@ export default function BookReader() {
                     type="button"
                     className={`transition-all duration-300 ${downloadError ? 'border-red-500 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : ''}`}
                 >
-                    <ArrowBigDownDash></ArrowBigDownDash>Download
+                    <ArrowBigDownDash></ArrowBigDownDash>{t("bookReader.download")}
                 </Button>
                 <div className="w-full flex items-center justify-center gap-3">
                     {isProgressVisible && <><Progress
@@ -555,11 +561,11 @@ export default function BookReader() {
                     disabled={profilesLoading}
                 >
                     <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Select a Profile" />
+                        <SelectValue placeholder={t("bookReader.selectProfile")} />
                     </SelectTrigger>
                     <SelectContent>
                         <SelectGroup>
-                            <SelectLabel>Profiles</SelectLabel>
+                            <SelectLabel>{t("bookReader.profiles")}</SelectLabel>
                             {(profiles.length ? profiles : [{ id: currentProfile || "1", label: currentProfile || "1", selectable: true }]).map((p) => (
                                 <SelectItem key={p.id} value={p.id} disabled={!p.selectable}>
                                     {p.label}
@@ -591,7 +597,7 @@ export default function BookReader() {
                                 onCheckedChange={(checked) => toggleAllBooks(!!checked)}
                                 {...(!allBooksToggled && someBooksToggled ? { indeterminate: "true" } : {})}
                             />
-                            <Label htmlFor="books">Enable all books for download</Label>
+                            <Label htmlFor="books">{t("bookReader.enableAllBooks")}</Label>
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -600,7 +606,7 @@ export default function BookReader() {
                                 checked={generateTocPages}
                                 onCheckedChange={(checked) => setGenerateTocPages(!!checked)}
                             />
-                            <Label htmlFor="generateTocPages">Generate table of contents pages</Label>
+                            <Label htmlFor="generateTocPages">{t("bookReader.generateToc")}</Label>
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -609,7 +615,7 @@ export default function BookReader() {
                                 checked={exportQuiz}
                                 onCheckedChange={(checked) => setExportQuiz(!!checked)}
                             />
-                            <Label htmlFor="exportQuiz">Export quiz</Label>
+                            <Label htmlFor="exportQuiz">{t("bookReader.exportQuiz")}</Label>
                         </div>
 
                         {/* TODO: add feature
@@ -650,7 +656,7 @@ export default function BookReader() {
                                     />
                                 </TooltipTrigger>
                                 <TooltipContent>
-                                    <p>Enable & Order</p>
+                                    <p>{t("bookReader.enableAndOrder")}</p>
                                 </TooltipContent>
                             </Tooltip>
                         </div>
@@ -660,13 +666,13 @@ export default function BookReader() {
                                for example because of a download start, it showns properly ), was this comment meant for orderbar?*/}
                             <TocBar
                                 items={orderBarItems.map(item => {
-                                    const tocEntry = tocHtml.find(t => t.id === item.id);
+                                    const tocEntry = tocHtml.find(toc => toc.id === item.id);
                                     const book = books.find(b => b.BookID === item.id);
 
                                     return {
                                         id: item.id,
-                                        title: book?.Titel || book?.CourseName || "(Unknown book)",
-                                        content: tocEntry?.content || <div>No TOC available</div>,
+                                        title: book?.Titel || book?.CourseName || t("bookReader.unknownBook"),
+                                        content: tocEntry?.content || <div>{t("bookReader.noTocAvailable")}</div>,
                                         toggled: book?.Toggled || false,
                                     };
                                 })}
@@ -694,7 +700,7 @@ export default function BookReader() {
     );
 }
 
-const fetchContentAndSetSrc = async (pageNumber: number) => {
+const fetchContentAndSetSrc = async (pageNumber: number, noBooksTitle: string, noBooksDescription: string) => {
     const { content: resulthtmlId } = await fetchWebResources("Z_PK", "ZTOPIC", pageNumber, "ZILPRESOURCE");
     const htmlId = typeof resulthtmlId === "number" ? resulthtmlId : parseInt(String(resulthtmlId || "0"), 10);
 
@@ -708,7 +714,7 @@ const fetchContentAndSetSrc = async (pageNumber: number) => {
     if (!fetchedHtml) {
         // Profile has no content for this page number (or no resources at all).
         // Return a friendly minimal HTML so the iframe never hard-errors.
-        return buildNoBooksHtml();
+        return buildNoBooksHtml(noBooksTitle, noBooksDescription);
     }
 
     // Process HTML to replace image sources with data URLs
@@ -787,7 +793,7 @@ const buildIframeSrc = (htmlContent: string) => {
     return URL.createObjectURL(blob);
 };
 
-function buildNoBooksHtml(): string {
+function buildNoBooksHtml(title: string, description: string): string {
     return `
     <html>
       <head>
@@ -813,8 +819,8 @@ function buildNoBooksHtml(): string {
       </head>
       <body>
         <div class="card">
-          <h1>There are no books</h1>
-          <p>This profile has no downloaded books/resources yet.</p>
+          <h1>${title}</h1>
+          <p>${description}</p>
         </div>
       </body>
     </html>

@@ -28,9 +28,9 @@ async function ensureTables(db: any) {
     )
   `);
 
-  const cols = await db.all<{ name: string }[]>(
+  const cols = (await db.all(
     `PRAGMA table_info(custom_quiz_questions);`
-  );
+  )) as { name: string }[];
 
   const hasHasAsset = cols.some((c) => c.name === "has_asset");
   if (!hasHasAsset) {

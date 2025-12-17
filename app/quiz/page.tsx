@@ -27,6 +27,7 @@ import {
   RadioGroupItem,
 } from "@/components/ui/radio-group";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useI18n } from "@/components/i18n-provider";
 
 type QuizAnswer = {
   id: number;
@@ -65,7 +66,13 @@ type QuizChapter = {
 type QuizBook = {
   id: number;
   title: string;
+  ref?: string | null;
   chapters: QuizChapter[];
+};
+
+type QuizResponse = {
+  ok: boolean;
+  books: QuizBook[];
 };
 
 function formatQuestionNumbers(nums: number[]): string {
@@ -97,7 +104,8 @@ function formatQuestionNumbers(nums: number[]): string {
 }
 
 export default function QuizPage() {
-  const [status, setStatus] = useState<string>("Idle");
+  const { t } = useI18n();
+  const [status, setStatus] = useState<string>(t("quiz.status.idle"));
   const [books, setBooks] = useState<QuizBook[]>([]);
   const [selectedBookId, setSelectedBookId] = useState<number | null>(null);
   const [loadingQuiz, setLoadingQuiz] = useState<boolean>(false);
@@ -142,22 +150,26 @@ export default function QuizPage() {
   }, [books.length, selectedBookId]);
 
   async function runDecrypt() {
-    setStatus("Decrypting questions and answers...");
+    setStatus(t("quiz.status.decrypting"));
     try {
       const res = await fetch("/api/quiz/decrypt", { method: "GET" });
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        setStatus("Decrypt failed");
+        setStatus(t("quiz.status.decryptFailed"));
         return false;
       }
       setStatus(
-        `Decrypted A: ${data.answerDecryptedRows}/${data.answerProcessedRows} | ` +
-        `Q: ${data.questionDecryptedRows}/${data.questionProcessedRows}`
+        t("quiz.status.decrypted", {
+          answerDecrypted: data.answerDecryptedRows,
+          answerTotal: data.answerProcessedRows,
+          questionDecrypted: data.questionDecryptedRows,
+          questionTotal: data.questionProcessedRows,
+        })
       );
       return true;
     } catch (err) {
       console.error(err);
-      setStatus("Decrypt error");
+      setStatus(t("quiz.status.decryptError"));
       return false;
     }
   }
@@ -215,10 +227,9 @@ export default function QuizPage() {
     <div className="container mx-auto py-8 space-y-6">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Beook Quiz</h1>
+          <h1 className="text-2xl font-bold">{t("quiz.title")}</h1>
           <p className="text-sm text-muted-foreground">
-            Questions are grouped by book and chapter. Answer them and then
-            reveal the solutions to see what you got right.
+            {t("quiz.description")}
           </p>
         </div>
         <div className="flex flex-col items-start sm:items-end gap-2">
@@ -234,7 +245,7 @@ export default function QuizPage() {
                 if (ok) await loadQuiz();
               }}
             >
-              decrypt again
+              {t("quiz.decryptAgain")}
             </Button>
             <Button
               variant={showSolutions ? "secondary" : "default"}
@@ -253,7 +264,7 @@ export default function QuizPage() {
               }}
               disabled={books.length === 0}
             >
-              {showSolutions ? "hide solution" : "show solution"}
+              {showSolutions ? t("quiz.hideSolution") : t("quiz.showSolution")}
             </Button>
           </div>
         </div>
@@ -263,15 +274,13 @@ export default function QuizPage() {
 
       {loadingQuiz && (
         <p className="text-sm text-muted-foreground">
-          loading quiz data...
+          {t("quiz.loadingQuiz")}
         </p>
       )}
 
       {books.length === 0 && !loadingQuiz && (
         <p className="text-sm text-muted-foreground">
-          No quiz content detected. Please verify that Beook is installed and
-          the decrypted database contains question and answer data. Make sure
-          to stop the Beook Application.
+          {t("quiz.noContent")}
         </p>
       )}
 
@@ -349,14 +358,14 @@ export default function QuizPage() {
                 <h2 className="text-xl font-semibold">{book.title}</h2>
                 {book.ref && (
                   <span className="text-xs text-muted-foreground">
-                    Product: {book.ref}
+                    {t("quiz.product")}: {book.ref}
                   </span>
                 )}
               </div>
 
               {book.chapters.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No questions found for this book.
+                  {t("quiz.noQuestions")}
                 </p>
               ) : (
                 <Accordion type="multiple" className="space-y-2">
@@ -369,11 +378,10 @@ export default function QuizPage() {
                       <AccordionTrigger className="px-4">
                         <div className="flex flex-col items-start gap-1">
                           <span className="font-medium">
-                            {chapter.title || "Chapter"}
+                            {chapter.title || t("common.chapter")}
                           </span>
                           <span className="text-xs text-muted-foreground">
-                            {chapter.questions.length} Question
-                            {chapter.questions.length !== 1 && "s"}
+                            {chapter.questions.length} {chapter.questions.length !== 1 ? t("common.questions") : t("common.question")}
                           </span>
                         </div>
                       </AccordionTrigger>
@@ -396,8 +404,7 @@ export default function QuizPage() {
                                   )}
                                 </div>
                                 <p className="text-xs text-muted-foreground">
-                                  This Material is relevant for Question{" "}
-                                  {formatQuestionNumbers(group.questionNumbers)}.
+                                  {t("quiz.materialRelevant", { questions: formatQuestionNumbers(group.questionNumbers) })}
                                 </p>
                               </div>
                             ))}
@@ -410,11 +417,11 @@ export default function QuizPage() {
                               <CardHeader>
                                 <CardTitle className="text-sm font-semibold">
                                   {idx + 1}.{" "}
-                                  {q.text || "(Fragetext nicht verfügbar)"}
+                                  {q.text || t("quiz.questionTextUnavailable")}
                                 </CardTitle>
                                 {q.ref && (
                                   <p className="text-xs text-muted-foreground">
-                                    Ref: {q.ref}
+                                    {t("quiz.ref")}: {q.ref}
                                   </p>
                                 )}
                               </CardHeader>
@@ -437,7 +444,7 @@ export default function QuizPage() {
 
                                 {q.answers.length === 0 && (
                                   <p className="text-xs text-muted-foreground">
-                                    No answer choices found.
+                                    {t("quiz.noAnswerChoices")}
                                   </p>
                                 )}
 
@@ -466,12 +473,11 @@ export default function QuizPage() {
                                       let feedback: string | null = null;
                                       if (showSolutions) {
                                         if (isCorrect && selected) {
-                                          feedback = "Correct!";
+                                          feedback = t("quiz.feedback.correct");
                                         } else if (isCorrect && !selected) {
-                                          feedback =
-                                            "Correct (not selected)";
+                                          feedback = t("quiz.feedback.correctNotSelected");
                                         } else if (!isCorrect && selected) {
-                                          feedback = "Wrong!";
+                                          feedback = t("quiz.feedback.wrong");
                                         }
                                       }
 

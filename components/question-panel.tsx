@@ -27,6 +27,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { useI18n } from "@/components/i18n-provider";
 
 type QuizRow = {
   id: number;
@@ -67,6 +68,7 @@ function getBookLabel(book: BookApiItem): string {
 }
 
 export default function QuestionsPanel() {
+  const { t } = useI18n();
   const [items, setItems] = React.useState<QuizRow[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [filter, setFilter] = React.useState("");
@@ -296,11 +298,11 @@ export default function QuestionsPanel() {
         const data = await res.json().catch(() => ({}));
         throw new Error(data?.error || "Delete failed");
       }
-      toast.info("Question removed");
+      toast.info(t("questionsPanel.questionRemoved"));
       // Optimistic update
       setItems((prev) => prev.filter((r) => r.id !== id));
     } catch (err: any) {
-      toast.error(err?.message || "Could not delete question");
+      toast.error(err?.message || t("questionsPanel.couldNotDelete"));
     }
   }
 
@@ -315,10 +317,10 @@ export default function QuestionsPanel() {
           {/* Search row (unchanged) */}
           <div className="flex items-end gap-3">
             <div className="flex-1 space-y-2">
-              <Label htmlFor="q-filter">Search</Label>
+              <Label htmlFor="q-filter">{t("questionsPanel.search")}</Label>
               <Input
                 id="q-filter"
-                placeholder="Filter by text…"
+                placeholder={t("questionsPanel.filterPlaceholder")}
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
               />
@@ -328,7 +330,7 @@ export default function QuestionsPanel() {
               type="button"
               onClick={() => setFilter("")}
             >
-              Clear
+              {t("common.clear")}
             </Button>
           </div>
 
@@ -342,11 +344,11 @@ export default function QuestionsPanel() {
               }}
             >
               <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by book" />
+                <SelectValue placeholder={t("common.book")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All books</SelectItem>
-                <SelectItem value="none">Book: None</SelectItem>
+                <SelectItem value="all">{t("questionsPanel.allBooks")}</SelectItem>
+                <SelectItem value="none">{t("questionsPanel.bookNone")}</SelectItem>
                 {availableBookRefs.map((ref) => (
                   <SelectItem key={ref} value={ref}>
                     {bookLabelForRef(ref)}
@@ -360,11 +362,11 @@ export default function QuestionsPanel() {
               onValueChange={setChapterFilter}
             >
               <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by chapter" />
+                <SelectValue placeholder={t("common.chapter")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All chapters</SelectItem>
-                <SelectItem value="none">Chapter: None</SelectItem>
+                <SelectItem value="all">{t("questionsPanel.allChapters")}</SelectItem>
+                <SelectItem value="none">{t("questionsPanel.chapterNone")}</SelectItem>
                 {availableChapterRefs.map((ref) => (
                   <SelectItem key={ref} value={ref}>
                     {chapterLabelForRef(
@@ -381,11 +383,11 @@ export default function QuestionsPanel() {
               onValueChange={(v: "newest" | "oldest") => setSortOrder(v)}
             >
               <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Sort by date" />
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="newest">Newest first</SelectItem>
-                <SelectItem value="oldest">Oldest first</SelectItem>
+                <SelectItem value="newest">{t("questionsPanel.newestFirst")}</SelectItem>
+                <SelectItem value="oldest">{t("questionsPanel.oldestFirst")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -397,8 +399,8 @@ export default function QuestionsPanel() {
           {filtered.length === 0 ? (
             <div className="p-6 text-sm text-muted-foreground">
               {items.length === 0
-                ? "No questions yet. Add your first one on the left."
-                : "No results for your filter."}
+                ? t("questionsPanel.noQuestionsYet")
+                : t("questionsPanel.noResults")}
             </div>
           ) : (
             <ScrollArea className="h-[39rem]">
@@ -421,13 +423,13 @@ export default function QuestionsPanel() {
                           {/* NEW: book / chapter info, but subtle */}
                           <div className="mt-1 text-xs text-muted-foreground flex flex-wrap gap-2">
                             <span>
-                              Book:{" "}
+                              {t("common.book")}:{" "}
                               <span className="font-medium">
                                 {bookLabelForRef(row.book_ref ?? null)}
                               </span>
                             </span>
                             <span>
-                              · Chapter:{" "}
+                              · {t("common.chapter")}:{" "}
                               <span className="font-medium">
                                 {chapterLabelForRef(
                                   row.chapter_ref ?? null,
@@ -439,14 +441,14 @@ export default function QuestionsPanel() {
 
                           <div className="mt-2 text-sm">
                             <div>
-                              <span className="font-medium">Correct:</span>{" "}
+                              <span className="font-medium">{t("common.correct")}:</span>{" "}
                               <span className="text-muted-foreground">
                                 {row.correct_answer}
                               </span>
                             </div>
                             <div className="mt-1">
                               <span className="font-medium">
-                                Wrong ({wrongs.length}):
+                                {t("common.wrong")} ({wrongs.length}):
                               </span>{" "}
                               <span className="text-muted-foreground break-words">
                                 {wrongs.join(" · ")}
@@ -472,25 +474,25 @@ export default function QuestionsPanel() {
                               variant="destructive"
                               className="shrink-0 opacity-80 group-hover:opacity-100"
                             >
-                              Delete
+                              {t("questionsPanel.deleteButton")}
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>
-                                Delete this question?
+                                {t("questionsPanel.deleteTitle")}
                               </AlertDialogTitle>
                             </AlertDialogHeader>
                             <p className="text-sm text-muted-foreground">
-                              This action cannot be undone.
+                              {t("questionsPanel.deleteWarning")}
                             </p>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
                               <AlertDialogAction
                                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                                 onClick={() => handleDelete(row.id)}
                               >
-                                Delete
+                                {t("common.delete")}
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>

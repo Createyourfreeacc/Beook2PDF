@@ -47,7 +47,7 @@ function decryptStoredPrefixed(stored: string) {
     const iv = CryptoJS.enc.Utf8.parse(IV_STRING);
 
     const decrypted = CryptoJS.DES.decrypt(
-      { ciphertext: CryptoJS.enc.Base64.parse(base64Payload) },
+      { ciphertext: CryptoJS.enc.Base64.parse(base64Payload) } as CryptoJS.lib.CipherParams,
       key,
       {
         iv,

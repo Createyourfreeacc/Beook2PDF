@@ -16,7 +16,15 @@ export async function GET(request: NextRequest) {
             ORDER BY Z_PK
         `);
 
-        const rows = statement.all();
+        const rows = statement.all() as Array<{
+            Z_PK: number;
+            ZTITLE: string;
+            ZPAGENUMBER: number;
+            ZACCESSPATH: string;
+            ZORDER: number;
+            ZISSUE: number;
+            ZLEVEL: number;
+        }>;
 
         const entries = rows.map(row => ({
             zpk: row.Z_PK,

@@ -101,7 +101,7 @@ function decryptStoredAnswer(stored: string) {
 
     // DES decrypt
     const decrypted = CryptoJS.DES.decrypt(
-      { ciphertext: CryptoJS.enc.Base64.parse(base64Payload) },
+      { ciphertext: CryptoJS.enc.Base64.parse(base64Payload) } as CryptoJS.lib.CipherParams,
       key,
       {
         iv,

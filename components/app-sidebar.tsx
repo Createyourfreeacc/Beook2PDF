@@ -1,6 +1,6 @@
 "use client"
 
-import { Book, Download, Home, Notebook, NotebookPen, Settings } from "lucide-react"
+import { Book, Notebook, NotebookPen, Settings } from "lucide-react"
 
 import {
   Sidebar,
@@ -11,45 +11,46 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { useI18n } from "@/components/i18n-provider"
 
 const items = [
   {
-    title: "Book",
+    titleKey: "nav.book",
     url: "/",
     icon: Book,
   },
   {
-    title: "Quiz",
+    titleKey: "nav.quiz",
     url: "/quiz",
     icon: Notebook,
   },
   {
-    title: "My Quiz",
+    titleKey: "nav.myQuiz",
     url: "/my-quiz",
     icon: NotebookPen,
   },
   {
-    title: "Settings",
+    titleKey: "nav.settings",
     url: "/settings",
     icon: Settings,
   },
 ]
 
 export function AppSidebar() {
+  const { t } = useI18n()
   return (
     <Sidebar>
       <SidebarContent>
         <SidebarGroup>
-          {/*<SidebarGroupLabel>Application</SidebarGroupLabel>*/}
           <SidebarGroupContent>
             <SidebarMenu>
               {items.map((item) => {
                 return (
-                  <SidebarMenuItem key={item.title} >
+                  <SidebarMenuItem key={item.titleKey}>
                     <SidebarMenuButton asChild>
                       <a href={item.url}>
                         <item.icon />
-                        <span>{item.title}</span>
+                        <span>{t(item.titleKey)}</span>
                       </a>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import React, { useState } from "react"
 import {
   DndContext,
   closestCenter,
@@ -26,7 +26,7 @@ import { ChevronUp, ChevronDown } from "lucide-react"
 
 type Item = {
   id: string
-  content: string | JSX.Element
+  content: React.ReactNode
   toggled?: boolean
 }
 
@@ -39,7 +39,7 @@ type OrderBarProps = {
 
 type SortableItemProps = {
   id: string
-  content: string | JSX.Element
+  content: React.ReactNode
   toggled: boolean
   onToggle: (id: string) => void
   isFirst: boolean

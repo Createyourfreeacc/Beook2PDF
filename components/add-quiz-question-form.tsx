@@ -13,6 +13,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { useI18n } from "@/components/i18n-provider";
 
 type AssetState =
   | {
@@ -50,6 +51,7 @@ function getBookLabel(book: BookApiItem): string {
 }
 
 export default function AddQuizQuestionForm() {
+  const { t } = useI18n();
   const [question, setQuestion] = useState("");
   const [correctAnswer, setCorrectAnswer] = useState("");
   const [wrongAnswers, setWrongAnswers] = useState<string[]>(["", "", ""]);
@@ -89,7 +91,7 @@ export default function AddQuizQuestionForm() {
         setBooks(list);
       } catch (err: any) {
         console.error("Failed to fetch books:", err);
-        setBooksError("Could not load books.");
+        setBooksError(t("addQuizForm.couldNotLoadBooks"));
       } finally {
         setBooksLoading(false);
       }
@@ -144,7 +146,7 @@ export default function AddQuizQuestionForm() {
         console.error("Failed to fetch chapters:", err);
         if (!cancelled) {
           setChapters([]);
-          setChaptersError("Could not load chapters.");
+          setChaptersError(t("addQuizForm.couldNotLoadChapters"));
         }
       } finally {
         if (!cancelled) {
@@ -188,7 +190,7 @@ export default function AddQuizQuestionForm() {
     }
 
     if (!file.type.startsWith("image/")) {
-      setMessage("Only image files are supported at the moment.");
+      setMessage(t("addQuizForm.onlyImages"));
       setAsset(null);
       return;
     }
@@ -219,13 +221,13 @@ export default function AddQuizQuestionForm() {
 
     if (trimmedWrong.length < 3) {
       setLoading(false);
-      setMessage("Please provide at least 3 wrong answers.");
+      setMessage(t("addQuizForm.minWrongAnswers"));
       return;
     }
 
     if (trimmedWrong.length > 30) {
       setLoading(false);
-      setMessage("Too many wrong answers (max 30).");
+      setMessage(t("addQuizForm.maxWrongAnswers"));
       return;
     }
 
@@ -263,7 +265,7 @@ export default function AddQuizQuestionForm() {
       setLoading(false);
 
       if (res.ok) {
-        setMessage("Question added successfully!");
+        setMessage(t("addQuizForm.success"));
         setQuestion("");
         setCorrectAnswer("");
         setWrongAnswers(["", "", ""]);
@@ -276,30 +278,30 @@ export default function AddQuizQuestionForm() {
 
         window.dispatchEvent(new CustomEvent("quiz:question-added"));
       } else {
-        setMessage(`Error: ${data.error ?? "Unknown error"}`);
+        setMessage(`${t("addQuizForm.errorPrefix")}: ${data.error ?? "Unknown error"}`);
       }
     } catch (err: any) {
       console.error(err);
       setLoading(false);
-      setMessage("Unexpected error while saving the question.");
+      setMessage(t("addQuizForm.unexpectedError"));
     }
   };
 
   return (
     <Card className="h-fit-[28rem]">
       <CardHeader>
-        <CardTitle>Add custom quiz</CardTitle>
+        <CardTitle>{t("addQuizForm.title")}</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Book / chapter assignment */}
           <div className="space-y-2">
-            <Label className="text-sm">Assign</Label>
+            <Label className="text-sm">{t("addQuizForm.assign")}</Label>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-1">
               {/* BOOK SELECT (optional, uses reference string) */}
               <div>
                 <Label className="text-xs text-muted-foreground">
-                  Book
+                  {t("addQuizForm.bookLabel")}
                 </Label>
                 <Select
                   value={selectedBookRef}
@@ -313,13 +315,13 @@ export default function AddQuizQuestionForm() {
                     <SelectValue
                       placeholder={
                         booksLoading
-                          ? "Loading books..."
-                          : "Select a book (optional)"
+                          ? t("addQuizForm.loadingBooks")
+                          : t("addQuizForm.selectBook")
                       }
                     />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="none">{t("common.none")}</SelectItem>
                     {books.map((b) => (
                       <SelectItem key={b.BookID} value={b.Refrence}>
                         {getBookLabel(b)}
@@ -337,7 +339,7 @@ export default function AddQuizQuestionForm() {
               {/* CHAPTER SELECT (driven by real chapters for the chosen book) */}
               <div>
                 <Label className="text-xs text-muted-foreground">
-                  Chapter
+                  {t("addQuizForm.chapterLabel")}
                 </Label>
                 <Select
                   value={selectedChapter}
@@ -352,15 +354,15 @@ export default function AddQuizQuestionForm() {
                     <SelectValue
                       placeholder={
                         !selectedBookRef || selectedBookRef === "none"
-                          ? "Select a book first"
+                          ? t("addQuizForm.selectBookFirst")
                           : chaptersLoading
-                            ? "Loading chapters..."
-                            : "Select a chapter (optional)"
+                            ? t("addQuizForm.loadingChapters")
+                            : t("addQuizForm.selectChapter")
                       }
                     />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="none">{t("common.none")}</SelectItem>
                     {chapters.map((c) => (
                       <SelectItem
                         key={c.ref || String(c.chapterId)}
@@ -379,13 +381,12 @@ export default function AddQuizQuestionForm() {
               </div>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Assigning a book is optional. If you choose &quot;None&quot;,
-              the question will not be linked.
+              {t("addQuizForm.assignHint")}
             </p>
           </div>
 
           <div>
-            <Label>Question</Label>
+            <Label>{t("addQuizForm.questionLabel")}</Label>
             <div className="flex items-center gap-2 mt-2">
               <Input
                 value={question}
@@ -396,7 +397,7 @@ export default function AddQuizQuestionForm() {
           </div>
 
           <div>
-            <Label>Correct answer</Label>
+            <Label>{t("addQuizForm.correctAnswerLabel")}</Label>
             <div className="flex items-center gap-2 mt-2">
               <Input
                 value={correctAnswer}
@@ -407,9 +408,9 @@ export default function AddQuizQuestionForm() {
           </div>
 
           <div>
-            <Label>Wrong answers</Label>
+            <Label>{t("addQuizForm.wrongAnswersLabel")}</Label>
             <p className="text-xs text-muted-foreground">
-              At least 3 wrong answers are required, up to 30.
+              {t("addQuizForm.wrongAnswersHint")}
             </p>
             <div className="space-y-2 mt-2">
               {wrongAnswers.map((answer, i) => (
@@ -420,7 +421,7 @@ export default function AddQuizQuestionForm() {
                       handleChangeWrongAnswer(i, e.target.value)
                     }
                     required={i < 3}
-                    placeholder={`Wrong answer ${i + 1}`}
+                    placeholder={t("addQuizForm.wrongAnswerPlaceholder", { number: i + 1 })}
                   />
                   {wrongAnswers.length > 3 && (
                     <Button
@@ -442,14 +443,14 @@ export default function AddQuizQuestionForm() {
                   className="mt-3"
                   onClick={addWrongAnswer}
                 >
-                  <Plus className="h-4 w-4 mr-2" /> Add additional wrong answer
+                  <Plus className="h-4 w-4 mr-2" /> {t("addQuizForm.addWrongAnswer")}
                 </Button>
               )}
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label>Image</Label>
+            <Label>{t("addQuizForm.imageLabel")}</Label>
 
             <div
               className="mt-1 h-32 md:h-40 border-2 border-dashed rounded-md flex flex-col items-center justify-center cursor-pointer hover:bg-muted/40 transition-colors"
@@ -457,11 +458,11 @@ export default function AddQuizQuestionForm() {
             >
               <ImageIcon className="h-8 w-8 mb-2 opacity-60" />
               <p className="text-xs text-muted-foreground">
-                Click to choose an image (optional)
+                {t("addQuizForm.imageHint")}
               </p>
               {asset && (
                 <p className="mt-2 text-[11px] text-muted-foreground text-center">
-                  Selected: <span className="font-mono">{asset.name}</span>
+                  {t("addQuizForm.selectedFile")}: <span className="font-mono">{asset.name}</span>
                 </p>
               )}
             </div>
@@ -477,7 +478,7 @@ export default function AddQuizQuestionForm() {
           </div>
 
           <Button type="submit" disabled={loading} className="w-full">
-            {loading ? "Saving..." : "Save Question"}
+            {loading ? t("addQuizForm.saving") : t("addQuizForm.saveQuestion")}
           </Button>
 
           {message && (

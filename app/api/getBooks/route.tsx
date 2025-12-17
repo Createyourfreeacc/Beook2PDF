@@ -45,7 +45,7 @@ export async function GET(request: Request) {
         `;
 
         const statement = db.prepare(sql);
-        const rows = statement.all();
+        const rows = statement.all() as Record<string, unknown>[];
 
 
         const resultList: any[] = [];
@@ -58,21 +58,21 @@ export async function GET(request: Request) {
 
             // Add basic course data
             COL_NAME_MAP.forEach(col => {
-                value[col] = row[col]?.toString() || '';
+                value[col] = (row[col] as string)?.toString() || '';
             });
 
             // Add language code
-            value["ZLANG"] = row["ZLANG"]?.toString() || '';
+            value["ZLANG"] = (row["ZLANG"] as string)?.toString() || '';
 
             // Extract folder from ZCOURSECONFIGFILEREFERENCE
             const configRefRaw = row["ZCOURSECONFIGFILEREFERENCE"];
             let folder = '';
             if (configRefRaw) {
                 try {
-                    const adjusted = (parseInt(configRefRaw.toString(), 16) - 1).toString(16).toUpperCase();
-                    folder = adjusted.padStart(configRefRaw.length, '0');
+                    const adjusted = (parseInt((configRefRaw as string).toString(), 16) - 1).toString(16).toUpperCase();
+                    folder = adjusted.padStart((configRefRaw as string).length, '0');
                 } catch {
-                    folder = configRefRaw.toString();
+                    folder = (configRefRaw as string).toString();
                 }
             }
 
@@ -126,12 +126,12 @@ export async function GET(request: Request) {
         `;
 
         const issueStatement = db.prepare(sqlIssue);
-        const issueRows = issueStatement.all();
+        const issueRows = issueStatement.all() as Record<string, unknown>[];
 
         const issueMap: Record<string, number[]> = {};
         issueRows.forEach(row => {
-            const reference = row["ZREFERENCE"]?.toString() || '';
-            const issueProduct = parseInt(row["ZISSUEPRODUCT"]?.toString() || '0', 10);
+            const reference = (row["ZREFERENCE"] as string)?.toString() || '';
+            const issueProduct = parseInt((row["ZISSUEPRODUCT"] as string)?.toString() || '0', 10);
 
             if (reference && !isNaN(issueProduct)) {
                 if (!issueMap[reference]) {
@@ -150,12 +150,12 @@ export async function GET(request: Request) {
         `;
 
         const titleStatement = db.prepare(sqlTitle);
-        const titleRows = titleStatement.all();
+        const titleRows = titleStatement.all() as Record<string, unknown>[];
 
-        const titleMap: Record<string, number[]> = {};
+        const titleMap: Record<string, string[]> = {};
         titleRows.forEach(row => {
-            const reference = row["ZCOURSEIDENTIFIER"]?.toString() || '';
-            const title = row["ZTITLE"]?.toString() || '';
+            const reference = (row["ZCOURSEIDENTIFIER"] as string)?.toString() || '';
+            const title = (row["ZTITLE"] as string)?.toString() || '';
 
             if (reference && title) {
                 if (!titleMap[reference]) {

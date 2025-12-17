@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sqlite from 'better-sqlite3';
-import puppeteer from 'puppeteer';
+import puppeteer, { type Page } from 'puppeteer';
 import {
   PDFDocument,
   PDFName,
@@ -708,7 +708,7 @@ export async function generateMergedPdf(
 }
 
 async function processPage(
-  page: puppeteer.Page,
+  page: Page,
   htmlContent: string,
   index: number
 ): Promise<Buffer> {
@@ -786,7 +786,7 @@ const INDEX_COL = "Z_PK";
 const COL_NAME_MAP = ["ZDATA", "ZTOPIC", "Z_PK", "ZMEDIATYPE", "ZISSUE"];
 
 export async function fetchPaginatedData(offset: number, limit: number, maxZPk: number, zissueCondition: string): Promise<{
-  data: Record<string, { ZDATA: any; ZTOPIC: number }>;
+  data: Record<string, Record<string, any>>;
   pagination: { total: number; limit: number; offset: number; hasMore: boolean };
 }> {
   const allColumns = [INDEX_COL, ...COL_NAME_MAP];
@@ -803,7 +803,7 @@ export async function fetchPaginatedData(offset: number, limit: number, maxZPk: 
     `;
 
     const statement = db.prepare(sql);
-    const rows = statement.all();
+    const rows = statement.all() as Record<string, unknown>[];
 
     const resultMap: Record<string, Record<string, any>> = {};
 
@@ -819,11 +819,11 @@ export async function fetchPaginatedData(offset: number, limit: number, maxZPk: 
           value[col] = `data:image/png;base64,${base64Image}`;
         } else {
           // Handle other data types as strings
-          value[col] = row[col as string]?.toString() || '';
+          value[col] = (row[col as string] as string)?.toString() || '';
         }
       });
 
-      resultMap[key] = value;
+      resultMap[key as string] = value;
     });
 
     db.close();
@@ -846,7 +846,7 @@ export async function fetchPaginatedData(offset: number, limit: number, maxZPk: 
 
 export async function getTOCData(): Promise<TOCData[]> {
   try {
-    const db = sqlite(DB_PATH);
+    const db = sqlite(getDbPath());
 
     const statement = db.prepare(`
                 SELECT Z_PK, ZTITLE, ZPAGENUMBER, ZACCESSPATH, ZORDER, ZTOPICDEFINITION, ZISSUE, ZLEVEL
@@ -855,7 +855,15 @@ export async function getTOCData(): Promise<TOCData[]> {
                 ORDER BY Z_PK
             `);
 
-    const rows = statement.all();
+    const rows = statement.all() as Array<{
+      Z_PK: number;
+      ZTITLE: string;
+      ZPAGENUMBER: number;
+      ZACCESSPATH: string;
+      ZORDER: number;
+      ZISSUE: number;
+      ZLEVEL: number;
+    }>;
 
     const entries: TOCData[] = rows.map(row => ({
       zpk: row.Z_PK,
@@ -2764,7 +2772,7 @@ function decryptStoredQA(stored: string) {
     const iv = CryptoJS.enc.Utf8.parse(QUIZ_IV_STRING);
 
     const decrypted = CryptoJS.DES.decrypt(
-      { ciphertext: CryptoJS.enc.Base64.parse(base64Payload) },
+      { ciphertext: CryptoJS.enc.Base64.parse(base64Payload) } as CryptoJS.lib.CipherParams,
       key,
       { iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
     );

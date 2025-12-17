@@ -1,11 +1,12 @@
 "use client"
 
+import React from "react"
 import { motion, AnimatePresence } from "framer-motion"
 
 type TocItem = {
   id: string
   title: string
-  content: string | JSX.Element
+  content: React.ReactNode
   toggled?: boolean
 }
 

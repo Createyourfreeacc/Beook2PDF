@@ -1,0 +1,51 @@
+{
+  "nav": {
+    "book": "Livre",
+    "quiz": "Quiz",
+    "myQuiz": "Mon quiz",
+    "settings": "Paramètres"
+  },
+  "settings": {
+    "theme": "Thème",
+    "language": "Langue",
+    "beookConfig": {
+      "title": "Configuration Beook",
+      "description": "Pointez vers votre dossier Beook (pas le fichier SQLite). Vous pouvez utiliser ${username} comme espace réservé pour le nom d'utilisateur Windows actuel.",
+      "folderLabel": "Dossier Beook",
+      "loading": "Chargement de la configuration...",
+      "saving": "Enregistrement...",
+      "save": "Enregistrer",
+      "resetToDefault": "Réinitialiser par défaut",
+      "loadError": "Échec du chargement de la configuration",
+      "loadException": "Erreur lors du chargement de la configuration",
+      "saveSuccess": "Configuration enregistrée avec succès",
+      "saveError": "Échec de l'enregistrement de la configuration",
+      "saveException": "Erreur lors de l'enregistrement de la configuration",
+      "resetSuccess": "Configuration réinitialisée par défaut",
+      "resetError": "Échec de la réinitialisation de la configuration",
+      "resetException": "Erreur lors de la réinitialisation de la configuration"
+    },
+    "miscDecrypt": {
+      "title": "Déchiffrement divers",
+      "description": "Déchiffrer les données utilisateur et propriétés de la base de données.",
+      "button": "Déchiffrer les données diverses (utilisateurs & propriétés)",
+      "running": "Déchiffrement en cours...",
+      "failed": "Échec du déchiffrement",
+      "error": "Erreur de déchiffrement",
+      "users": "Utilisateurs",
+      "properties": "Propriétés"
+    }
+  },
+  "languages": {
+    "en": "English",
+    "de": "Deutsch",
+    "fr": "Français",
+    "it": "Italiano",
+    "es": "Español"
+  },
+  "theme": {
+    "light": "Clair",
+    "dark": "Sombre",
+    "system": "Système"
+  }
+}

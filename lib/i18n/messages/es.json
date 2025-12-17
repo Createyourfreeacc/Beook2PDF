@@ -1,0 +1,51 @@
+{
+  "nav": {
+    "book": "Libro",
+    "quiz": "Quiz",
+    "myQuiz": "Mi cuestionario",
+    "settings": "Configuración"
+  },
+  "settings": {
+    "theme": "Tema",
+    "language": "Idioma",
+    "beookConfig": {
+      "title": "Configuración de Beook",
+      "description": "Apunta a tu carpeta Beook (no al archivo SQLite). Puedes usar ${username} como marcador de posición para el nombre de usuario de Windows actual.",
+      "folderLabel": "Carpeta Beook",
+      "loading": "Cargando configuración...",
+      "saving": "Guardando...",
+      "save": "Guardar",
+      "resetToDefault": "Restablecer valores predeterminados",
+      "loadError": "Error al cargar la configuración",
+      "loadException": "Error al cargar la configuración",
+      "saveSuccess": "Configuración guardada correctamente",
+      "saveError": "Error al guardar la configuración",
+      "saveException": "Error al guardar la configuración",
+      "resetSuccess": "Configuración restablecida a los valores predeterminados",
+      "resetError": "Error al restablecer la configuración",
+      "resetException": "Error al restablecer la configuración"
+    },
+    "miscDecrypt": {
+      "title": "Descifrado misceláneo",
+      "description": "Descifrar datos de usuario y propiedades de la base de datos.",
+      "button": "Descifrar datos misceláneos (usuarios y propiedades)",
+      "running": "Ejecutando descifrado...",
+      "failed": "Descifrado fallido",
+      "error": "Error de descifrado",
+      "users": "Usuarios",
+      "properties": "Propiedades"
+    }
+  },
+  "languages": {
+    "en": "English",
+    "de": "Deutsch",
+    "fr": "Français",
+    "it": "Italiano",
+    "es": "Español"
+  },
+  "theme": {
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema"
+  }
+}

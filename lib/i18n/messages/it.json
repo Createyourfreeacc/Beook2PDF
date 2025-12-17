@@ -1,0 +1,51 @@
+{
+  "nav": {
+    "book": "Libro",
+    "quiz": "Quiz",
+    "myQuiz": "Il mio quiz",
+    "settings": "Impostazioni"
+  },
+  "settings": {
+    "theme": "Tema",
+    "language": "Lingua",
+    "beookConfig": {
+      "title": "Configurazione Beook",
+      "description": "Punta alla tua cartella Beook (non al file SQLite). Puoi usare ${username} come segnaposto per il nome utente Windows corrente.",
+      "folderLabel": "Cartella Beook",
+      "loading": "Caricamento configurazione...",
+      "saving": "Salvataggio...",
+      "save": "Salva",
+      "resetToDefault": "Ripristina predefiniti",
+      "loadError": "Impossibile caricare la configurazione",
+      "loadException": "Errore durante il caricamento della configurazione",
+      "saveSuccess": "Configurazione salvata con successo",
+      "saveError": "Impossibile salvare la configurazione",
+      "saveException": "Errore durante il salvataggio della configurazione",
+      "resetSuccess": "Configurazione ripristinata ai valori predefiniti",
+      "resetError": "Impossibile ripristinare la configurazione",
+      "resetException": "Errore durante il ripristino della configurazione"
+    },
+    "miscDecrypt": {
+      "title": "Decrittazione varie",
+      "description": "Decrittare i dati utente e proprietà dal database.",
+      "button": "Decrittare dati vari (utenti e proprietà)",
+      "running": "Decrittazione in corso...",
+      "failed": "Decrittazione fallita",
+      "error": "Errore di decrittazione",
+      "users": "Utenti",
+      "properties": "Proprietà"
+    }
+  },
+  "languages": {
+    "en": "English",
+    "de": "Deutsch",
+    "fr": "Français",
+    "it": "Italiano",
+    "es": "Español"
+  },
+  "theme": {
+    "light": "Chiaro",
+    "dark": "Scuro",
+    "system": "Sistema"
+  }
+}

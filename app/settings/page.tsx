@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { useTheme } from "next-themes";
-import { Laptop, Moon, Sun } from "lucide-react";
+import { Laptop, Moon, Sun, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { useI18n } from "@/components/i18n-provider";
+import { SUPPORTED_LOCALES, type Locale } from "@/lib/i18n/locales";
 import {
   Select,
   SelectContent,
@@ -27,6 +29,7 @@ type ProfileInfo = {
 
 export default function ContentPage() {
   const { theme, setTheme } = useTheme();
+  const { locale, setLocale, t } = useI18n();
   const [themeMounted, setThemeMounted] = useState(false);
   // Avoid hydration mismatch: next-themes reads the persisted theme on the client,
   // but SSR must render a deterministic value.
@@ -71,11 +74,11 @@ export default function ContentPage() {
           setProfiles([]);
         }
       } else {
-        setMessage({ type: "error", text: "Failed to load config" });
+        setMessage({ type: "error", text: t("settings.beookConfig.loadError") });
       }
     } catch (err) {
       console.error(err);
-      setMessage({ type: "error", text: "Error loading config" });
+      setMessage({ type: "error", text: t("settings.beookConfig.loadException") });
     } finally {
       setLoading(false);
     }
@@ -95,7 +98,7 @@ export default function ContentPage() {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setMessage({ type: "success", text: data.message || "Config saved successfully" });
+        setMessage({ type: "success", text: t("settings.beookConfig.saveSuccess") });
         setResolvedDbPath(data.resolved.dbPath);
         setResolvedImgPath(data.resolved.imgPath);
 
@@ -109,11 +112,11 @@ export default function ContentPage() {
           setProfiles([]);
         }
       } else {
-        setMessage({ type: "error", text: data.error || "Failed to save config" });
+        setMessage({ type: "error", text: t("settings.beookConfig.saveError") });
       }
     } catch (err) {
       console.error(err);
-      setMessage({ type: "error", text: "Error saving config" });
+      setMessage({ type: "error", text: t("settings.beookConfig.saveException") });
     } finally {
       setSaving(false);
     }
@@ -137,7 +140,7 @@ export default function ContentPage() {
         setSelectedProfile(data.config.selectedProfile);
         setResolvedDbPath(data.resolved.dbPath);
         setResolvedImgPath(data.resolved.imgPath);
-        setMessage({ type: "success", text: data.message || "Config reset to defaults" });
+        setMessage({ type: "success", text: t("settings.beookConfig.resetSuccess") });
 
         const profRes = await fetch("/api/profiles");
         const profData = await profRes.json();
@@ -148,35 +151,35 @@ export default function ContentPage() {
           setProfiles([]);
         }
       } else {
-        setMessage({ type: "error", text: data.error || "Failed to reset config" });
+        setMessage({ type: "error", text: t("settings.beookConfig.resetError") });
       }
     } catch (err) {
       console.error(err);
-      setMessage({ type: "error", text: "Error resetting config" });
+      setMessage({ type: "error", text: t("settings.beookConfig.resetException") });
     } finally {
       setSaving(false);
     }
   }
 
   async function runMiscDecrypt() {
-    setMiscDecryptStatus("Running misc decryption...");
+    setMiscDecryptStatus(t("settings.miscDecrypt.running"));
     try {
       const res = await fetch("/api/decrypt/misc");
       const data = await res.json();
 
       if (!res.ok || !data.ok) {
         console.error("Misc decrypt error:", data);
-        setMiscDecryptStatus("Misc decrypt failed");
+        setMiscDecryptStatus(t("settings.miscDecrypt.failed"));
         return;
       }
 
       setMiscDecryptStatus(
-        `Users: ${data.userDecryptedRows}/${data.userProcessedRows} | ` +
-          `Properties: ${data.propertyDecryptedRows}/${data.propertyProcessedRows}`
+        `${t("settings.miscDecrypt.users")}: ${data.userDecryptedRows}/${data.userProcessedRows} | ` +
+          `${t("settings.miscDecrypt.properties")}: ${data.propertyDecryptedRows}/${data.propertyProcessedRows}`
       );
     } catch (err) {
       console.error(err);
-      setMiscDecryptStatus("Misc decrypt error");
+      setMiscDecryptStatus(t("settings.miscDecrypt.error"));
     }
   }
 
@@ -184,7 +187,7 @@ export default function ContentPage() {
     <div className="space-y-6">
       <Card>
         <CardContent className="space-y-2">
-          <Label>Theme</Label>
+          <Label>{t("settings.theme")}</Label>
           <Select value={currentTheme} onValueChange={setTheme}>
             <SelectTrigger className="w-[220px]">
               <div className="flex items-center gap-2">
@@ -195,7 +198,7 @@ export default function ContentPage() {
                 ) : (
                   <Laptop className="h-4 w-4" />
                 )}
-                <span className="capitalize">{currentTheme}</span>
+                <span>{t(`theme.${currentTheme}`)}</span>
               </div>
             </SelectTrigger>
             <SelectContent>
@@ -203,19 +206,19 @@ export default function ContentPage() {
                 <SelectItem value="light">
                   <span className="flex items-center gap-2">
                     <Sun className="h-4 w-4" />
-                    Light
+                    {t("theme.light")}
                   </span>
                 </SelectItem>
                 <SelectItem value="dark">
                   <span className="flex items-center gap-2">
                     <Moon className="h-4 w-4" />
-                    Dark
+                    {t("theme.dark")}
                   </span>
                 </SelectItem>
                 <SelectItem value="system">
                   <span className="flex items-center gap-2">
                     <Laptop className="h-4 w-4" />
-                    System
+                    {t("theme.system")}
                   </span>
                 </SelectItem>
               </SelectGroup>
@@ -225,19 +228,44 @@ export default function ContentPage() {
       </Card>
 
       <Card>
+        <CardContent className="space-y-2">
+          <Label>{t("settings.language")}</Label>
+          <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
+            <SelectTrigger className="w-[220px]">
+              <div className="flex items-center gap-2">
+                <Globe className="h-4 w-4" />
+                <span>{t(`languages.${locale}`)}</span>
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {SUPPORTED_LOCALES.map((loc) => (
+                  <SelectItem key={loc} value={loc}>
+                    <span className="flex items-center gap-2">
+                      {t(`languages.${loc}`)}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader>
-          <CardTitle>Beook Configuration</CardTitle>
+          <CardTitle>{t("settings.beookConfig.title")}</CardTitle>
           <CardDescription>
-            Point to your Beook folder (not the SQLite file). You can use {"${username}"} as a placeholder for the current Windows username.
+            {t("settings.beookConfig.description")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading configuration...</p>
+            <p className="text-sm text-muted-foreground">{t("settings.beookConfig.loading")}</p>
           ) : (
             <>
               <div className="space-y-2">
-                <Label htmlFor="beookDir">Beook Folder</Label>
+                <Label htmlFor="beookDir">{t("settings.beookConfig.folderLabel")}</Label>
                 <Input
                   id="beookDir"
                   value={beookDir}
@@ -260,14 +288,14 @@ export default function ContentPage() {
 
               <div className="flex items-center gap-2">
                 <Button onClick={saveConfig} disabled={saving || loading}>
-                  {saving ? "Saving..." : "Save"}
+                  {saving ? t("settings.beookConfig.saving") : t("settings.beookConfig.save")}
                 </Button>
                 <Button
                   variant="outline"
                   onClick={resetToDefault}
                   disabled={saving || loading}
                 >
-                  Reset to Default
+                  {t("settings.beookConfig.resetToDefault")}
                 </Button>
               </div>
             </>
@@ -277,15 +305,15 @@ export default function ContentPage() {
       
       <Card>
         <CardHeader>
-          <CardTitle>Misc Decryption</CardTitle>
+          <CardTitle>{t("settings.miscDecrypt.title")}</CardTitle>
           <CardDescription>
-            Decrypt user and property data from the database.
+            {t("settings.miscDecrypt.description")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={runMiscDecrypt}>
-              Decrypt misc data (users &amp; properties)
+              {t("settings.miscDecrypt.button")}
             </Button>
 
             {miscDecryptStatus && (

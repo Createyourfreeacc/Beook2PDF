@@ -1,0 +1,51 @@
+{
+  "nav": {
+    "book": "Buch",
+    "quiz": "Quiz",
+    "myQuiz": "Mein Quiz",
+    "settings": "Einstellungen"
+  },
+  "settings": {
+    "theme": "Design",
+    "language": "Sprache",
+    "beookConfig": {
+      "title": "Beook-Konfiguration",
+      "description": "Wählen Sie Ihren Beook-Ordner (nicht die SQLite-Datei). Sie können ${username} als Platzhalter für den aktuellen Windows-Benutzernamen verwenden.",
+      "folderLabel": "Beook-Ordner",
+      "loading": "Konfiguration wird geladen...",
+      "saving": "Speichern...",
+      "save": "Speichern",
+      "resetToDefault": "Auf Standard zurücksetzen",
+      "loadError": "Konfiguration konnte nicht geladen werden",
+      "loadException": "Fehler beim Laden der Konfiguration",
+      "saveSuccess": "Konfiguration erfolgreich gespeichert",
+      "saveError": "Konfiguration konnte nicht gespeichert werden",
+      "saveException": "Fehler beim Speichern der Konfiguration",
+      "resetSuccess": "Konfiguration auf Standard zurückgesetzt",
+      "resetError": "Konfiguration konnte nicht zurückgesetzt werden",
+      "resetException": "Fehler beim Zurücksetzen der Konfiguration"
+    },
+    "miscDecrypt": {
+      "title": "Sonstige Entschlüsselung",
+      "description": "Benutzer- und Eigenschaftsdaten aus der Datenbank entschlüsseln.",
+      "button": "Sonstige Daten entschlüsseln (Benutzer & Eigenschaften)",
+      "running": "Entschlüsselung läuft...",
+      "failed": "Entschlüsselung fehlgeschlagen",
+      "error": "Entschlüsselungsfehler",
+      "users": "Benutzer",
+      "properties": "Eigenschaften"
+    }
+  },
+  "languages": {
+    "en": "English",
+    "de": "Deutsch",
+    "fr": "Français",
+    "it": "Italiano",
+    "es": "Español"
+  },
+  "theme": {
+    "light": "Hell",
+    "dark": "Dunkel",
+    "system": "System"
+  }
+}

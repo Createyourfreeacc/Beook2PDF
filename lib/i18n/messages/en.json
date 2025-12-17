@@ -1,0 +1,51 @@
+{
+  "nav": {
+    "book": "Book",
+    "quiz": "Quiz",
+    "myQuiz": "My Quiz",
+    "settings": "Settings"
+  },
+  "settings": {
+    "theme": "Theme",
+    "language": "Language",
+    "beookConfig": {
+      "title": "Beook Configuration",
+      "description": "Point to your Beook folder (not the SQLite file). You can use ${username} as a placeholder for the current Windows username.",
+      "folderLabel": "Beook Folder",
+      "loading": "Loading configuration...",
+      "saving": "Saving...",
+      "save": "Save",
+      "resetToDefault": "Reset to Default",
+      "loadError": "Failed to load config",
+      "loadException": "Error loading config",
+      "saveSuccess": "Config saved successfully",
+      "saveError": "Failed to save config",
+      "saveException": "Error saving config",
+      "resetSuccess": "Config reset to defaults",
+      "resetError": "Failed to reset config",
+      "resetException": "Error resetting config"
+    },
+    "miscDecrypt": {
+      "title": "Misc Decryption",
+      "description": "Decrypt user and property data from the database.",
+      "button": "Decrypt misc data (users & properties)",
+      "running": "Running misc decryption...",
+      "failed": "Misc decrypt failed",
+      "error": "Misc decrypt error",
+      "users": "Users",
+      "properties": "Properties"
+    }
+  },
+  "languages": {
+    "en": "English",
+    "de": "Deutsch",
+    "fr": "Français",
+    "it": "Italiano",
+    "es": "Español"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  }
+}

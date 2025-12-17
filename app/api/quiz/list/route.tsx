@@ -1,15 +1,9 @@
 import { NextResponse } from "next/server";
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
+import { getResolvedPaths } from "@/lib/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const username = os.userInfo().username;
-const DB_PATH = path.resolve(
-  `C:/Users/${username}/AppData/Roaming/ionesoft/beook/release/profiles/1/data/beook_book_v6.sqlite`
-);
 
 type RawRow = {
   // Book
@@ -79,6 +73,7 @@ function extractNumberPrefix(title: string | null): number {
 
 export async function GET() {
   let db: Database.Database;
+  const { dbPath: DB_PATH } = getResolvedPaths();
 
   try {
     db = new Database(DB_PATH, { readonly: true });

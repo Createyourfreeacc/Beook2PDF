@@ -21,7 +21,9 @@ import fs from 'fs';
 import path from 'path';
 import CryptoJS from 'crypto-js';
 
-const { dbPath: DB_PATH } = getResolvedPaths();
+function getDbPath() {
+  return getResolvedPaths().dbPath;
+}
 
 // A4 size in PDF points (72 pt/inch)
 const A4_WIDTH = 595.28;
@@ -295,7 +297,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function getMaxZPk(): Promise<number> {
-  const db = sqlite(DB_PATH);
+  const db = sqlite(getDbPath());
 
   const maxZPkSql = `SELECT COUNT(*) as maxZPk FROM ZILPRESOURCE WHERE Z_PK IS NOT NULL`;
   const maxZPkResult = db.prepare(maxZPkSql).get() as { maxZPk: number };
@@ -349,7 +351,7 @@ function embedFontsIntoCss(css: string): string {
   const idToDataUrl: Record<number, string> = {};
 
   try {
-    db = sqlite(DB_PATH);
+    db = sqlite(getDbPath());
 
     const stmt = db.prepare(
       `SELECT "ZDATA", "ZMEDIATYPE" FROM "ZILPRESOURCE" WHERE "Z_PK" = ?`
@@ -790,7 +792,7 @@ export async function fetchPaginatedData(offset: number, limit: number, maxZPk: 
   const allColumns = [INDEX_COL, ...COL_NAME_MAP];
 
   try {
-    const db = sqlite(DB_PATH);
+    const db = sqlite(getDbPath());
 
     const sql = `
       SELECT ${allColumns.map(col => `"${col}"`).join(', ')}
@@ -1759,7 +1761,7 @@ async function loadQuizDataForBooks(books: Book[]): Promise<QuizBook[]> {
   }
   if (bookIds.length === 0) return [];
 
-  const db = sqlite(DB_PATH);
+  const db = sqlite(getDbPath());
   try {
     const placeholders = bookIds.map(() => '?').join(', ');
 
@@ -2839,7 +2841,7 @@ async function ensureQuizDecryptedTablesForExport(books: Book[]) {
   if (issueIds.length === 0) return { ok: true, issues: 0, updatedQuestions: 0, updatedAnswers: 0 };
 
   // open writable (needed to create/populate decrypted tables)
-  const db = sqlite(DB_PATH, { readonly: false });
+  const db = sqlite(getDbPath(), { readonly: false });
 
   try {
     // Guard: base tables must exist

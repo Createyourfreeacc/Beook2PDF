@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server';
 import sqlite3 from 'sqlite3';
 import { getResolvedPaths } from '@/lib/config';
 
-const { dbPath: DB_PATH } = getResolvedPaths();
-
 export async function GET(request: Request) {
     const searchParams = new URL(request.url).searchParams;
     const id = searchParams.get('id')?.toString();
@@ -13,6 +11,7 @@ export async function GET(request: Request) {
     }
 
     try {
+        const { dbPath: DB_PATH } = getResolvedPaths();
         const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READONLY);
 
         return new Promise<NextResponse>((resolve, reject) => {

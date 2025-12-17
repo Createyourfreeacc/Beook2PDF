@@ -52,7 +52,6 @@ export const dynamic = "force-dynamic";
 
 
 import { getResolvedPaths } from '@/lib/config';
-const { dbPath: DB_PATH } = getResolvedPaths();
 
 // ==========================================================================
 // CRYPTO CONSTANTS — FROM ILPBookSettingsHelper (decompiled)
@@ -177,6 +176,7 @@ function parseDecryptedAnswerPayload(plaintext: string | null): {
 // ==========================================================================
 export async function GET() {
   let db: Database.Database;
+  const { dbPath: DB_PATH } = getResolvedPaths();
 
   try {
     // open DB writable because we will create / delete table rows

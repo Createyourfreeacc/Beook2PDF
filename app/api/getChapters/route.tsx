@@ -5,8 +5,6 @@ import { getResolvedPaths } from '@/lib/config';
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const { dbPath: DB_PATH } = getResolvedPaths();
-
 /**
  * GET /api/getChapters?bookRef=978-3-905036-95-4
  *
@@ -26,6 +24,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const { dbPath: DB_PATH } = getResolvedPaths();
     const db = sqlite(DB_PATH);
 
     const stmt = db.prepare(`

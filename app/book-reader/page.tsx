@@ -58,6 +58,12 @@ type Book = {
     Toggled: boolean;
 };
 
+type ProfileInfo = {
+    id: string;
+    label: string;
+    selectable: boolean;
+};
+
 export default function BookReader() {
     const [content, setContent] = useState('');
     const [loading, setLoading] = useState(true);
@@ -67,12 +73,14 @@ export default function BookReader() {
     const [isProgressVisible, setIsProgressVisible] = useState(false);
     const [progressClient, setProgressClient] = useState(0);
     const [muteEvent, setMuteEvent] = useState(false);
-    const [tocHtml, setTocHtml] = useState<{ id: string; content: JSX.Element }[]>([]);
+    const [tocHtml, setTocHtml] = useState<{ id: string; content: React.ReactNode }[]>([]);
     const pageIframeSrc = useMemo(() => buildIframeSrc(content), [content]);
     const [jobId, setJobId] = useState<string | null>(null);
+    const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
+    const [profilesLoading, setProfilesLoading] = useState<boolean>(true);
     const [currentProfile, setCurrentProfile] = useState<string>('');
     const [books, setBooks] = useState<Book[]>([]);
-    const [orderBarItems, setOrderBarItems] = useState<{ id: string; content: JSX.Element }[]>([]); // TODO: maybe remove, books already beeing reordered, only here for img
+    const [orderBarItems, setOrderBarItems] = useState<{ id: string; content: React.ReactNode }[]>([]); // TODO: maybe remove, books already beeing reordered, only here for img
     const [downloadError, setDownloadError] = useState(false);
 
     const [generateTocPages, setGenerateTocPages] = useState(true);
@@ -87,6 +95,55 @@ export default function BookReader() {
     useEffect(() => {
         muteEventRef.current = muteEvent;
     }, [muteEvent]);
+
+    // Load config + profiles on mount, and set initial profile (default should be "1")
+    useEffect(() => {
+        const initProfiles = async () => {
+            try {
+                setProfilesLoading(true);
+                const cfgRes = await fetch("/api/config");
+                const cfgData = await cfgRes.json();
+
+                const selected = cfgRes.ok && cfgData?.success
+                    ? (cfgData.config?.selectedProfile?.toString() || "1")
+                    : "1";
+
+                const profRes = await fetch("/api/profiles");
+                const profData = await profRes.json();
+
+                const list: ProfileInfo[] = profRes.ok && profData?.success
+                    ? (profData.profiles || [])
+                    : [];
+
+                setProfiles(list);
+
+                // If selected is not selectable, pick the first selectable profile
+                const selectable = list.filter((p) => p.selectable);
+                const selectedIsSelectable = list.some((p) => p.id === selected && p.selectable);
+
+                const effective = selectedIsSelectable
+                    ? selected
+                    : (selectable[0]?.id || selected);
+
+                if (effective !== selected) {
+                    await fetch("/api/config", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ selectedProfile: effective }),
+                    });
+                }
+
+                setCurrentProfile(effective);
+            } catch (e) {
+                console.error("Failed to init profiles:", e);
+                setCurrentProfile("1");
+            } finally {
+                setProfilesLoading(false);
+            }
+        };
+
+        initProfiles();
+    }, []);
 
     useEffect(() => {
         const jobId = crypto.randomUUID();
@@ -109,6 +166,7 @@ export default function BookReader() {
 
     useEffect(() => {
         const getBooks = async () => {
+            if (!currentProfile) return;
             try {
                 const response = await fetch(`/api/getBooks`);
                 if (!response.ok) {
@@ -143,6 +201,7 @@ export default function BookReader() {
 
         // Fetch last page number from ZTOPIC
         const fetchMaxPage = async () => {
+            if (!currentProfile) return;
             try {
                 const maxTopic = await fetchMaxIntCol("ZTOPIC", "ZILPRESOURCE");
 
@@ -159,14 +218,6 @@ export default function BookReader() {
     }, [currentProfile]);
 
     useEffect(() => {
-        //TODO REMOVE
-        Object.keys(books).forEach(key => {
-            const book = books[key];
-            console.log(`Book key: ${key}; BookID: ${(book as any)["BookID"]}; CourseName: ${(book as any)["CourseName"]}; Refrence: ${(book as any)["Refrence"]}; Toggled: ${(book as any)["Toggled"]};`);
-            console.log(`Issue: ${(book as any)["Issue"]}`);
-            console.log('-------------------');
-        });
-
         // Fetch TOC Entries Dynamically
         const fetchTOCEntries = async () => {
             try {
@@ -213,7 +264,7 @@ export default function BookReader() {
         );
     };
 
-    const generateTOCHtml = (entries: any[]): { id: string; content: JSX.Element }[] => {
+    const generateTOCHtml = (entries: any[]): { id: string; content: React.ReactNode }[] => {
         return books.map(book => {
             const matchingEntries = entries.filter(entry =>
                 book.Issue.includes(entry.zIssue)
@@ -233,7 +284,7 @@ export default function BookReader() {
                             const tocElements = [];
                             let i = 0;
 
-                            const createEntryElement = (e) => (
+                            const createEntryElement = (e: any) => (
                                 <div
                                     key={`${e.zpk}`}
                                     style={{
@@ -327,7 +378,7 @@ export default function BookReader() {
 
     // Listen for Messages from TOC Iframe
     useEffect(() => {
-        const handleMessage = (event) => {
+        const handleMessage = (event: MessageEvent<any>) => {
             if (event.data?.page !== undefined) {
                 const newPage = parseInt(event.data.page, 10);
                 if (!isNaN(newPage) && newPage >= 1 && newPage <= maxPage) {
@@ -370,8 +421,9 @@ export default function BookReader() {
 
     // main content loading logic
     useEffect(() => {
+        if (!currentProfile) return;
         loadIframe();
-    }, [currentPage]);
+    }, [currentPage, currentProfile]);
 
     const nextPage = async () => {
         const nextValidPage = await findValidPage(currentPage + 1, 'next');
@@ -454,18 +506,36 @@ export default function BookReader() {
                         className="transition duration-700 ease-in-out ..." /><span className="text-sm">{progressClient}%</span></>
                     }
                 </div>
-                <Select>
+                <Select
+                    value={currentProfile}
+                    onValueChange={async (value) => {
+                        try {
+                            setLoading(true);
+                            // Persist selection first so backend requests read the right DB
+                            await fetch("/api/config", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ selectedProfile: value }),
+                            });
+                            setCurrentProfile(value);
+                            setCurrentPage(1);
+                        } catch (e) {
+                            console.error("Failed to switch profile:", e);
+                        }
+                    }}
+                    disabled={profilesLoading}
+                >
                     <SelectTrigger className="w-[180px]">
                         <SelectValue placeholder="Select a Profile" />
                     </SelectTrigger>
                     <SelectContent>
                         <SelectGroup>
                             <SelectLabel>Profiles</SelectLabel>
-                            <SelectItem value="apple">Apple</SelectItem>
-                            <SelectItem value="banana">Banana</SelectItem>
-                            <SelectItem value="blueberry">Blueberry</SelectItem>
-                            <SelectItem value="grapes">Grapes</SelectItem>
-                            <SelectItem value="pineapple">Pineapple</SelectItem>
+                            {(profiles.length ? profiles : [{ id: currentProfile || "1", label: currentProfile || "1", selectable: true }]).map((p) => (
+                                <SelectItem key={p.id} value={p.id} disabled={!p.selectable}>
+                                    {p.label}
+                                </SelectItem>
+                            ))}
                         </SelectGroup>
                     </SelectContent>
                 </Select>

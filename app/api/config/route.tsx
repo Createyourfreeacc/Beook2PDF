@@ -13,10 +13,13 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       config: {
-        dbPath: config.dbPath,
-        imgPath: config.imgPath,
+        beookDir: config.beookDir,
+        selectedProfile: config.selectedProfile,
       },
       resolved: {
+        beookDir: resolved.beookDir,
+        selectedProfile: resolved.selectedProfile,
+        profilesDir: resolved.profilesDir,
         dbPath: resolved.dbPath,
         imgPath: resolved.imgPath,
       },
@@ -34,7 +37,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { dbPath, imgPath, reset } = body;
+    const { beookDir, selectedProfile, reset } = body;
 
     // Handle reset request
     if (reset === true) {
@@ -45,43 +48,51 @@ export async function POST(request: NextRequest) {
         success: true,
         message: 'Config reset to defaults',
         config: {
-          dbPath: defaultConfig.dbPath,
-          imgPath: defaultConfig.imgPath,
+          beookDir: defaultConfig.beookDir,
+          selectedProfile: defaultConfig.selectedProfile,
         },
         resolved: {
+          beookDir: resolved.beookDir,
+          selectedProfile: resolved.selectedProfile,
+          profilesDir: resolved.profilesDir,
           dbPath: resolved.dbPath,
           imgPath: resolved.imgPath,
         },
       });
     }
 
-    // Validate input
-    if (typeof dbPath !== 'string' || typeof imgPath !== 'string') {
+    // Partial update: keep existing values if not provided
+    const current = getConfig();
+
+    const nextBeookDir =
+      typeof beookDir === 'string' ? beookDir : current.beookDir;
+    const nextSelectedProfile =
+      typeof selectedProfile === 'string'
+        ? selectedProfile
+        : current.selectedProfile;
+
+    if (typeof nextBeookDir !== 'string' || !nextBeookDir.trim()) {
       return NextResponse.json(
-        { success: false, error: 'dbPath and imgPath must be strings' },
+        { success: false, error: 'beookDir must be a non-empty string' },
         { status: 400 }
       );
     }
 
-    if (!dbPath.trim() || !imgPath.trim()) {
-      return NextResponse.json(
-        { success: false, error: 'dbPath and imgPath cannot be empty' },
-        { status: 400 }
-      );
-    }
-
-    // Update config
-    setConfig({ dbPath, imgPath });
+    // Update config (lib/config will normalize selectedProfile and validate)
+    setConfig({ beookDir: nextBeookDir, selectedProfile: nextSelectedProfile });
     const resolved = getResolvedPaths();
 
     return NextResponse.json({
       success: true,
       message: 'Config updated successfully',
       config: {
-        dbPath,
-        imgPath,
+        beookDir: nextBeookDir,
+        selectedProfile: nextSelectedProfile,
       },
       resolved: {
+        beookDir: resolved.beookDir,
+        selectedProfile: resolved.selectedProfile,
+        profilesDir: resolved.profilesDir,
         dbPath: resolved.dbPath,
         imgPath: resolved.imgPath,
       },

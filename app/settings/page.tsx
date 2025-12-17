@@ -6,11 +6,28 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+type ProfileInfo = {
+  id: string;
+  label: string;
+  selectable: boolean;
+  reason?: string;
+};
 
 export default function ContentPage() {
   const [miscDecryptStatus, setMiscDecryptStatus] = useState<string | null>(null);
-  const [dbPath, setDbPath] = useState<string>("");
-  const [imgPath, setImgPath] = useState<string>("");
+  const [beookDir, setBeookDir] = useState<string>("");
+  const [selectedProfile, setSelectedProfile] = useState<string>("");
+  const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
   const [resolvedDbPath, setResolvedDbPath] = useState<string>("");
   const [resolvedImgPath, setResolvedImgPath] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(true);
@@ -19,20 +36,29 @@ export default function ContentPage() {
 
   // Load current config on mount
   useEffect(() => {
-    loadConfig();
+    loadConfigAndProfiles();
   }, []);
 
-  async function loadConfig() {
+  async function loadConfigAndProfiles() {
     try {
       setLoading(true);
       const res = await fetch("/api/config");
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setDbPath(data.config.dbPath);
-        setImgPath(data.config.imgPath);
+        setBeookDir(data.config.beookDir || "");
+        setSelectedProfile(data.config.selectedProfile || "1");
         setResolvedDbPath(data.resolved.dbPath);
         setResolvedImgPath(data.resolved.imgPath);
+
+        // Load profiles based on the configured beookDir
+        const profRes = await fetch("/api/profiles");
+        const profData = await profRes.json();
+        if (profRes.ok && profData.success) {
+          setProfiles(profData.profiles || []);
+        } else {
+          setProfiles([]);
+        }
       } else {
         setMessage({ type: "error", text: "Failed to load config" });
       }
@@ -52,7 +78,7 @@ export default function ContentPage() {
       const res = await fetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dbPath, imgPath }),
+        body: JSON.stringify({ beookDir, selectedProfile }),
       });
 
       const data = await res.json();
@@ -61,6 +87,15 @@ export default function ContentPage() {
         setMessage({ type: "success", text: data.message || "Config saved successfully" });
         setResolvedDbPath(data.resolved.dbPath);
         setResolvedImgPath(data.resolved.imgPath);
+
+        // Refresh profiles after saving beookDir (in case it changed)
+        const profRes = await fetch("/api/profiles");
+        const profData = await profRes.json();
+        if (profRes.ok && profData.success) {
+          setProfiles(profData.profiles || []);
+        } else {
+          setProfiles([]);
+        }
       } else {
         setMessage({ type: "error", text: data.error || "Failed to save config" });
       }
@@ -86,11 +121,19 @@ export default function ContentPage() {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setDbPath(data.config.dbPath);
-        setImgPath(data.config.imgPath);
+        setBeookDir(data.config.beookDir);
+        setSelectedProfile(data.config.selectedProfile);
         setResolvedDbPath(data.resolved.dbPath);
         setResolvedImgPath(data.resolved.imgPath);
         setMessage({ type: "success", text: data.message || "Config reset to defaults" });
+
+        const profRes = await fetch("/api/profiles");
+        const profData = await profRes.json();
+        if (profRes.ok && profData.success) {
+          setProfiles(profData.profiles || []);
+        } else {
+          setProfiles([]);
+        }
       } else {
         setMessage({ type: "error", text: data.error || "Failed to reset config" });
       }
@@ -128,9 +171,9 @@ export default function ContentPage() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Path Configuration</CardTitle>
+          <CardTitle>Beook Configuration</CardTitle>
           <CardDescription>
-            Configure the database and image paths used by the application. You can use {"${username}"} as a placeholder for the current Windows username.
+            Point to your Beook folder (not the SQLite file). You can use {"${username}"} as a placeholder for the current Windows username.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -139,35 +182,46 @@ export default function ContentPage() {
           ) : (
             <>
               <div className="space-y-2">
-                <Label htmlFor="dbPath">Database Path</Label>
+                <Label htmlFor="beookDir">Beook Folder</Label>
                 <Input
-                  id="dbPath"
-                  value={dbPath}
-                  onChange={(e) => setDbPath(e.target.value)}
-                  placeholder="C:/Users/${username}/AppData/Roaming/..."
+                  id="beookDir"
+                  value={beookDir}
+                  onChange={(e) => setBeookDir(e.target.value)}
+                  placeholder="C:/Users/${username}/AppData/Roaming/ionesoft/beook"
                   disabled={saving}
                 />
                 {resolvedDbPath && (
                   <p className="text-xs text-muted-foreground">
-                    Resolved: <span className="font-mono">{resolvedDbPath}</span>
+                    DB: <span className="font-mono">{resolvedDbPath}</span>
+                  </p>
+                )}
+                {resolvedImgPath && (
+                  <p className="text-xs text-muted-foreground">
+                    Images: <span className="font-mono">{resolvedImgPath}</span>
                   </p>
                 )}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="imgPath">Image Path</Label>
-                <Input
-                  id="imgPath"
-                  value={imgPath}
-                  onChange={(e) => setImgPath(e.target.value)}
-                  placeholder="C:/Users/${username}/AppData/Roaming/..."
-                  disabled={saving}
-                />
-                {resolvedImgPath && (
-                  <p className="text-xs text-muted-foreground">
-                    Resolved: <span className="font-mono">{resolvedImgPath}</span>
-                  </p>
-                )}
+                <Label>Profile</Label>
+                <Select value={selectedProfile} onValueChange={setSelectedProfile}>
+                  <SelectTrigger className="w-[260px]">
+                    <SelectValue placeholder="Select a Profile" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel>Profiles</SelectLabel>
+                      {(profiles.length ? profiles : [{ id: selectedProfile || "1", label: selectedProfile || "1", selectable: true }]).map((p) => (
+                        <SelectItem key={p.id} value={p.id} disabled={!p.selectable}>
+                          {p.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Profile folder <span className="font-mono">0</span> is a dummy and ignored. Profiles with an empty <span className="font-mono">ZILPUSER</span> table are disabled.
+                </p>
               </div>
 
               {message && (

@@ -24,7 +24,6 @@ export const dynamic = "force-dynamic";
 
 // DB path loaded from centralized config
 import { getResolvedPaths } from '@/lib/config';
-const { dbPath: DB_PATH } = getResolvedPaths();
 
 // From ILPBookSettingsHelper (same as quiz decrypt)
 const KEY_STRING = "fdäK?s^dw-+ç,W!El";
@@ -81,6 +80,7 @@ function decryptStoredPrefixed(stored: string) {
 
 export async function GET() {
   let db: Database.Database;
+  const { dbPath: DB_PATH } = getResolvedPaths();
 
   try {
     db = new Database(DB_PATH, { readonly: false });

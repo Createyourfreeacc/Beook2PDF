@@ -4,8 +4,6 @@ import path from 'path';
 import fs from 'fs';
 import { getResolvedPaths } from '@/lib/config';
 
-const { dbPath: DB_PATH, imgPath: IMG_PATH } = getResolvedPaths();
-
 function findFolderContainingFile(rootDir: string, filename: string): string | null {
     const subdirs = fs.readdirSync(rootDir);
     for (const subdir of subdirs) {
@@ -32,6 +30,7 @@ export async function GET(request: Request) {
     const allProductCols = ADDITIONAL_COLS;
 
     try {
+        const { dbPath: DB_PATH, imgPath: IMG_PATH } = getResolvedPaths();
         const db = sqlite(DB_PATH);
 
         const sql = `

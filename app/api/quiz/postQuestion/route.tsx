@@ -3,9 +3,8 @@ import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import { getResolvedPaths } from '@/lib/config';
 
-const { dbPath: DB_PATH } = getResolvedPaths();
-
 async function getDb() {
+  const { dbPath: DB_PATH } = getResolvedPaths();
   const db = await open({
     filename: DB_PATH,
     driver: sqlite3.Database,

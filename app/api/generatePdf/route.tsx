@@ -53,7 +53,7 @@ interface ExportOptions {
 interface TOCData {
   zpk: number;
   title: string;
-  pagenum: number | null;
+  pagenum: number;
   chapterSection: string;
   zOrder: number;
   zIssue: number;
@@ -922,7 +922,7 @@ export async function getTOCData(): Promise<TOCData[]> {
     const rows = statement.all() as Array<{
       Z_PK: number;
       ZTITLE: string;
-      ZPAGENUMBER: number | null;
+      ZPAGENUMBER: number;
       ZACCESSPATH: string;
       ZORDER: number;
       ZISSUE: number;
@@ -1623,7 +1623,7 @@ function mergeTOCData(
 
   type TempEntry = {
     pdfPage: number;
-    bookPage: number | null;
+    bookPage: number;
     label: string;
     level: number;
     order: number;

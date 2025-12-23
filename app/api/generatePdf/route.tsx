@@ -53,7 +53,7 @@ interface ExportOptions {
 interface TOCData {
   zpk: number;
   title: string;
-  pagenum: number;
+  pagenum: number | null;
   chapterSection: string;
   zOrder: number;
   zIssue: number;
@@ -457,20 +457,62 @@ export async function modifyContent(books: Book[], dataMap: Record<string, { Z_P
         }
       }
 
-      // Extract CSS ID from HTML
-      const htmlLines = processedHtml.split('\n');
-      const linkTagLine = htmlLines[4];  // 5th line (0-based index is 4)
-      const hrefMatch = linkTagLine.match(/href=".*\/(\d+)"/);
-      const cssId = hrefMatch ? parseInt(hrefMatch[1]) : null;
+      // Extract ALL CSS links from HTML in *document order* (preserves cascade)
+      const cssIdsOrdered: number[] = [];
+      const cssIdsSeen = new Set<number>();
 
-      // Remove everything but the body
-      const lines = processedHtml.split('\n');
-      const modifiedHtml = lines.slice(6, -1).join('\n');
+      // Match each <link ...> tag, then filter for rel="stylesheet" and href=".../pk/<id>"
+      const linkTagRegex = /<link\b[^>]*>/gi;
+      let linkMatch: RegExpExecArray | null;
 
-      // If CSS ID is valid, fetch the CSS; otherwise, set fetchedCss to empty string
+      while ((linkMatch = linkTagRegex.exec(processedHtml)) !== null) {
+        const tag = linkMatch[0];
+
+        // Only inline real stylesheets
+        if (!/rel=["']stylesheet["']/i.test(tag)) continue;
+
+        // Extract pk/<id> from href
+        const hrefIdMatch = tag.match(/href=["'][^"']*\/pk\/(\d+)["']/i);
+        if (!hrefIdMatch) continue;
+
+        const id = parseInt(hrefIdMatch[1], 10);
+        if (Number.isNaN(id) || cssIdsSeen.has(id)) continue;
+
+        cssIdsSeen.add(id);
+        cssIdsOrdered.push(id);
+      }
+
+      // Extract body INCLUDING its attributes (keeps body#id and body.calibre selectors working)
+      const bodyWholeMatch = processedHtml.match(/<body\b[^>]*>[\s\S]*?<\/body>/i);
+      const modifiedHtml = bodyWholeMatch ? bodyWholeMatch[0] : processedHtml;
+
+      // Fetch + merge linked CSS in the same order as in the HTML
       let fetchedCss = "";
-      if (cssId !== null && dataMap[cssId]?.ZDATA) {
-        fetchedCss = dataMap[cssId].ZDATA;
+      for (const cssId of cssIdsOrdered) {
+        const cssContent = dataMap[cssId]?.ZDATA;
+        if (typeof cssContent === "string" && cssContent.trim()) {
+          fetchedCss += cssContent + "\n";
+        }
+      }
+
+      // Also add *ONLY* @font-face blocks from other CSS in the same ZISSUE
+      // (helps books where fonts are declared in an extra CSS not linked in HTML,
+      //  without importing layout-changing rules like max-width/margins.)
+      const currentIssue = entry.ZISSUE;
+      for (const [key, val] of Object.entries(dataMap)) {
+        if (!val || val.ZMEDIATYPE !== "text/css") continue;
+        if (String(val.ZISSUE) !== String(currentIssue)) continue;
+
+        const id = parseInt(key, 10);
+        if (Number.isNaN(id) || cssIdsSeen.has(id)) continue;
+
+        const css = val.ZDATA;
+        if (typeof css !== "string" || !css.includes("@font-face")) continue;
+
+        const fontFaceBlocks = css.match(/@font-face\s*{[\s\S]*?}\s*/g);
+        if (fontFaceBlocks && fontFaceBlocks.length) {
+          fetchedCss += "\n" + fontFaceBlocks.join("\n") + "\n";
+        }
       }
 
       // Embed font blobs as data: URLs so Puppeteer can actually use them
@@ -514,10 +556,31 @@ export async function modifyContent(books: Book[], dataMap: Record<string, { Z_P
                     display: none !important;
                   }
 
-                  /* Optional but helps avoid surprises from global margins */
-                  body {
-                    margin: 0;
-                    padding: 0;
+                  /* Override ebook CSS constraints for proper PDF rendering:
+                     - Remove max-width limitations that cause small content
+                     - Let content fill the available space
+                     - Add reasonable margins for print layout
+                  */
+                  html, body {
+                    max-width: none !important;
+                    width: 100% !important;
+                    margin: 0 !important;
+                    padding: 40px 60px !important;
+                    box-sizing: border-box !important;
+                  }
+                  
+                  /* Ensure content containers also expand */
+                  body > div,
+                  .calibre,
+                  .Einfacher-Textrahmen {
+                    max-width: none !important;
+                    width: auto !important;
+                  }
+                  
+                  /* Scale images to fit within content area */
+                  img {
+                    max-width: 100% !important;
+                    height: auto !important;
                   }
                 </style>
             </head>
@@ -812,11 +875,12 @@ export async function fetchPaginatedData(offset: number, limit: number, maxZPk: 
       const value: Record<string, any> = {};
 
       COL_NAME_MAP.forEach(col => {
-        if (col === 'ZDATA' && row['ZMEDIATYPE'] === 'image/png') {
-          // Handle image data - convert to base64
+        const mediaType = row['ZMEDIATYPE'] as string | null;
+        if (col === 'ZDATA' && mediaType?.startsWith('image/')) {
+          // Handle all image types - convert to base64 with correct MIME type
           const buffer = Buffer.from(row[col] as any);
           const base64Image = buffer.toString('base64');
-          value[col] = `data:image/png;base64,${base64Image}`;
+          value[col] = `data:${mediaType};base64,${base64Image}`;
         } else {
           // Handle other data types as strings
           value[col] = (row[col as string] as string)?.toString() || '';
@@ -858,7 +922,7 @@ export async function getTOCData(): Promise<TOCData[]> {
     const rows = statement.all() as Array<{
       Z_PK: number;
       ZTITLE: string;
-      ZPAGENUMBER: number;
+      ZPAGENUMBER: number | null;
       ZACCESSPATH: string;
       ZORDER: number;
       ZISSUE: number;
@@ -1538,7 +1602,7 @@ function mergeTOCData(
       issueToBookIndex.set(Number(issue), i);
     }
   }
-
+  
   // For each group/book: map "book printed page" -> "global pdf page"
   const pageMapPerBook: Map<number, number>[] = [];
   for (let i = 0; i < groupCount; i++) {
@@ -1559,7 +1623,7 @@ function mergeTOCData(
 
   type TempEntry = {
     pdfPage: number;
-    bookPage: number;
+    bookPage: number | null;
     label: string;
     level: number;
     order: number;

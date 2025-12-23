@@ -1,6 +1,9 @@
 // electron-main.js
 const { app, BrowserWindow } = require("electron");
 const path = require("path");
+
+const isDev = process.env.NODE_ENV === "development";
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
@@ -13,11 +16,15 @@ function createWindow() {
     },
   });
 
-  // For now: load your running Next.js app on localhost:3000
-  win.loadURL("http://localhost:3000");
-  
-  // Uncomment if you want devtools:
-  // win.webContents.openDevTools();
+  if (isDev) {
+    // During development: load localhost
+    win.loadURL("http://localhost:3000");
+    win.webContents.openDevTools();
+  } else {
+    // Production: load the Next.js build
+    const startUrl = `file://${path.join(__dirname, "out", "index.html")}`;
+    win.loadURL(startUrl);
+  }
 }
 
 app.whenReady().then(() => {

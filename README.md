@@ -28,6 +28,16 @@ cd beook2pdf
 npm install
 ```
 
+## Build
+
+```bash
+rmdir /s /q node_modules
+del package-lock.json
+setx PUPPETEER_CACHE_DIR ".puppeteer"
+npm install
+powershell -ExecutionPolicy Bypass -File .\tools\clean-dist-win.ps1
+```
+
 ## Usage
 
 ### Web Application
@@ -73,8 +83,8 @@ This tool has been tested with the following learning materials:
 
 - Only tested with a limited set of learning materials
 - PDF generation uses Puppeteer (may have performance implications for very large books)
-- Electron app requires manual server startup (not yet bundled as standalone executable)
+- Electron app bundles a local Next.js server (no manual server startup needed in releases) (not yet bundled as standalone executable)
 
 ## License
-This app, "Beook2Pdf", is an independent product and is not affiliated with Ionesoft, the publisher and developer of Beook. The use of the word "Beook" does not imply any official approval or partnership with Ionesoft.
+This app, "Beook2PDF", is an independent product and is not affiliated with Ionesoft, the publisher and developer of Beook. The use of the word "Beook" does not imply any official approval or partnership with Ionesoft.
 This project is for educational purposes only. Please respect the intellectual property rights of content creators and publishers.

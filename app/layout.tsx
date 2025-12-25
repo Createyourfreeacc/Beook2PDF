@@ -15,7 +15,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Beook2Pdf",
+  title: "Beook2PDF",
   description: "Export any Content in Beook to a PDF",
   icons: {
     icon: '/favicon.ico',
@@ -66,7 +66,7 @@ export default async function RootLayout({ children }:
                         <Image src="/leaf.ico" alt="Logo" width={20} height={20} className="block" />
                       </Link>
                       <span className="text-base">
-                        Beook<span style={{ color: "#a7ce38" }}>2</span>Pdf
+                        Beook<span style={{ color: "#a7ce38" }}>2</span>PDF
                       </span>
                     </div>
                   </div>

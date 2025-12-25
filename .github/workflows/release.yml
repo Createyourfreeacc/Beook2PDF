@@ -1,0 +1,44 @@
+name: Release Windows installer
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies (download Puppeteer Chromium into repo)
+        run: npm ci
+        env:
+          PUPPETEER_CACHE_DIR: .puppeteer
+
+      - name: Rebuild native modules for Electron (better-sqlite3/sqlite3)
+        run: npx electron-builder install-app-deps
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Prepare Electron resources (Next standalone + assets + Puppeteer cache)
+        run: node tools/prepare-electron.mjs
+        env:
+          PUPPETEER_CACHE_DIR: .puppeteer
+
+      - name: Build NSIS installer and publish GitHub Release assets
+        run: npx electron-builder --win nsis --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

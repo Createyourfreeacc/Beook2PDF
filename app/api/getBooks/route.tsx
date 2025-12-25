@@ -187,7 +187,7 @@ export async function GET(request: Request) {
             const title = titleMap[courseId] || [];
 
             transformedResultList.push({
-                BookID: bookId,                         // 1 Note: Beook2Pdf internal ID. Number taken from Z_PK but fundametally arbitrary and does not give any information about datastructure TODO: make it just the counter of the foreach to avoid confusion
+                BookID: bookId,                         // 1 Note: Beook2PDF internal ID. Number taken from Z_PK but fundametally arbitrary and does not give any information about datastructure TODO: make it just the counter of the foreach to avoid confusion
                 Titel: title,                           // Allgemeine Luftfahrzeugkenntnisse
                 CourseName: courseId,                   // PPL020A
                 Refrence: reference,                    // 978-3-905036-95-4

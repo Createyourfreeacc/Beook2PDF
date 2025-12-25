@@ -146,7 +146,7 @@ type AssetRow = {
 };
 
 // Use Montserrat Unicode fonts from assets/fonts for all pdf-lib text we draw
-const FONT_DIR = path.join(process.cwd(), 'assets', 'fonts');
+const FONT_DIR = path.join(process.env.BEOOK2PDF_APP_ROOT ?? process.cwd(), 'assets', 'fonts');
 const MONT_REGULAR_PATH = path.join(
   FONT_DIR,
   'montserrat-v13-latin_latin-ext-regular.ttf'
@@ -278,11 +278,15 @@ export async function GET(request: NextRequest) {
 
     setPhaseProgress(jobId, 'finalize', 1);
     await new Promise(res => setImmediate(res))
-    return new Response(mergedPdfBytes, {
+    // Ensure we have a real ArrayBuffer (not SharedArrayBuffer / ArrayBufferLike)
+    const body = mergedPdfBytes.byteLength
+      ? mergedPdfBytes.slice().buffer // slice() makes a new Uint8Array backed by ArrayBuffer
+      : new ArrayBuffer(0);
+
+    return new Response(body, {
       status: 200,
       headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': 'attachment; filename=book.pdf',
+        "Content-Type": "application/pdf",
       },
     });
   } catch (error) {
@@ -1602,7 +1606,7 @@ function mergeTOCData(
       issueToBookIndex.set(Number(issue), i);
     }
   }
-  
+
   // For each group/book: map "book printed page" -> "global pdf page"
   const pageMapPerBook: Map<number, number>[] = [];
   for (let i = 0; i < groupCount; i++) {

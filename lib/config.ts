@@ -15,7 +15,21 @@ export interface AppConfig {
   selectedProfile: string;
 }
 
-const CONFIG_FILE = path.join(process.cwd(), 'config.json');
+const CONFIG_DIR = (() => {
+  // For the packaged Windows app, we must store config in a writable user folder,
+  // NOT next to the installed executable (Program Files is read-only for non-admins).
+  if (process.platform === 'win32') {
+    const appData =
+      process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming');
+    return path.join(appData, 'Beook2PDF');
+  }
+
+  // Fallback (mainly for local/dev use on non-Windows).
+  return path.join(os.homedir(), '.beook2pdf');
+})();
+
+const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+const LEGACY_CONFIG_FILE = path.join(process.cwd(), 'config.json');
 
 // Default paths
 function getDefaultConfig(): AppConfig {
@@ -89,6 +103,17 @@ function normalizeProfileId(profile: unknown): string {
 // Read config from file or return defaults
 export function getConfig(): AppConfig {
   try {
+    // One-time migration: move dev-era config (project root) into the per-user config dir.
+    // This also makes the installed app work (Program Files is not writable).
+    try {
+      if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
+      if (!fs.existsSync(CONFIG_FILE) && fs.existsSync(LEGACY_CONFIG_FILE)) {
+        fs.copyFileSync(LEGACY_CONFIG_FILE, CONFIG_FILE);
+      }
+    } catch (migrationError) {
+      console.warn('Config migration failed (continuing with defaults):', migrationError);
+    }
+
     if (fs.existsSync(CONFIG_FILE)) {
       const fileContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
       const parsed: any = JSON.parse(fileContent);
@@ -118,6 +143,7 @@ export function getConfig(): AppConfig {
 // Write config to file
 export function setConfig(config: AppConfig): void {
   try {
+    if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
     // Validate config
     if (typeof config.beookDir !== 'string' || typeof config.selectedProfile !== 'string') {
       throw new Error('Invalid config: beookDir and selectedProfile must be strings');

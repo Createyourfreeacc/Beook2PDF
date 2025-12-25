@@ -4,3 +4,6 @@ node_modules/
 tools/GlobalKeystoreDump.class
 config.json
 tsconfig.tsbuildinfo
+release/
+.puppeteer
+dist/

@@ -1,0 +1,45 @@
+appId: ch.beook2pdf.app
+productName: Beook2PDF
+
+asar: true
+
+# Keep your packaged app lean: only ship the Electron main process + prebuilt resources.
+files:
+  - "electron-main.js"
+  - "electron-preload.js"
+  - "app/**"
+  - "dist/desktop/**"
+  - "package.json"
+
+# Everything your runtime Next.js server needs is shipped as Windows resources
+# and located via process.resourcesPath.
+extraResources:
+  - from: dist/desktop/next
+    to: next
+  - from: dist/desktop/next_node_modules
+    to: next_node_modules
+  - from: dist/desktop/assets
+    to: assets
+  - from: dist/desktop/puppeteer
+    to: puppeteer
+
+directories:
+  output: release
+
+artifactName: "${productName}-Setup-${version}.${ext}"
+
+win:
+  signExts: []
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: app/favicon.ico
+
+nsis:
+  oneClick: false
+  perMachine: true
+  allowElevation: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Beook2PDF

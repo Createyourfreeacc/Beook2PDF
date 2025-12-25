@@ -33,9 +33,15 @@ const LEGACY_CONFIG_FILE = path.join(process.cwd(), 'config.json');
 
 // Default paths
 function getDefaultConfig(): AppConfig {
-  const username = os.userInfo().username;
+  // Use os.homedir() to get the actual user's home directory
+  // This works across different Windows setups and avoids hardcoding C:/Users/
+  const homeDir = os.homedir();
+  const appDataDir = process.platform === 'win32' 
+    ? (process.env.APPDATA ?? path.join(homeDir, 'AppData', 'Roaming'))
+    : path.join(homeDir, '.config');
+  
   return {
-    beookDir: `C:/Users/${username}/AppData/Roaming/ionesoft/beook`,
+    beookDir: path.join(appDataDir, 'ionesoft', 'beook'),
     selectedProfile: '1',
   };
 }
@@ -44,6 +50,40 @@ function getDefaultConfig(): AppConfig {
 function resolvePath(pathString: string): string {
   const username = os.userInfo().username;
   return pathString.replace(/\$\{username\}/g, username);
+}
+
+// Fix hardcoded usernames in paths - replaces any username in a path with the current user's path
+function fixHardcodedUsername(pathString: string): string {
+  if (!pathString || typeof pathString !== 'string') return pathString;
+  
+  const currentHomeDir = os.homedir();
+  const currentUsername = os.userInfo().username;
+  
+  // Normalize both paths for comparison (use forward slashes)
+  const normalized = pathString.replace(/\\/g, '/');
+  const normalizedHome = currentHomeDir.replace(/\\/g, '/');
+  
+  // Pattern to match Windows user paths: C:/Users/<username>/ or /Users/<username>/
+  // This matches the drive letter (optional), /Users/, username, and the rest
+  const userPathPattern = /^([A-Z]:)?\/Users\/([^\/]+)(\/.*)$/i;
+  const match = normalized.match(userPathPattern);
+  
+  if (match) {
+    const [, drive, oldUsername, rest] = match;
+    
+    // Only fix if the username in the path doesn't match the current user
+    if (oldUsername.toLowerCase() !== currentUsername.toLowerCase()) {
+      // Reconstruct the path with the current user's home directory
+      // Preserve the original drive letter if present, otherwise use the current home's drive
+      const driveLetter = drive || (normalizedHome.match(/^([A-Z]:)/i)?.[1] || '');
+      const fixedPath = `${driveLetter}/Users/${currentUsername}${rest}`;
+      
+      // Convert back to the original path separator style (preserve backslashes if original had them)
+      return pathString.includes('\\') ? fixedPath.replace(/\//g, '\\') : fixedPath;
+    }
+  }
+  
+  return pathString;
 }
 
 type LegacyAppConfig = {
@@ -86,8 +126,9 @@ function migrateLegacyConfig(legacy: LegacyAppConfig): AppConfig {
   const m = normalizedDb.match(/\/release\/profiles\/(\d+)\//i);
   if (m?.[1]) selectedProfile = m[1];
 
+  const beookDir = beookDirGuess || getDefaultConfig().beookDir;
   return {
-    beookDir: beookDirGuess || getDefaultConfig().beookDir,
+    beookDir: fixHardcodedUsername(beookDir),
     selectedProfile,
   };
 }
@@ -119,14 +160,27 @@ export function getConfig(): AppConfig {
       const parsed: any = JSON.parse(fileContent);
 
       if (isV2Config(parsed)) {
+        // Fix any hardcoded usernames in the path
+        const fixedBeookDir = fixHardcodedUsername(parsed.beookDir);
+        
+        // If the path was fixed, save it back to the config file
+        if (fixedBeookDir !== parsed.beookDir) {
+          setConfig({
+            beookDir: fixedBeookDir,
+            selectedProfile: normalizeProfileId(parsed.selectedProfile),
+          });
+        }
+        
         return {
-          beookDir: parsed.beookDir,
+          beookDir: fixedBeookDir,
           selectedProfile: normalizeProfileId(parsed.selectedProfile),
         };
       }
 
       if (isLegacyConfig(parsed)) {
         const migrated = migrateLegacyConfig(parsed);
+        // Fix any hardcoded usernames in the migrated path
+        migrated.beookDir = fixHardcodedUsername(migrated.beookDir);
         // Persist migration so the rest of the app uses the new shape.
         setConfig(migrated);
         return migrated;

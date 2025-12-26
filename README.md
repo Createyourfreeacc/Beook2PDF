@@ -16,7 +16,7 @@ A Windows application that exports content from the DRM-protected Beook e-learni
 
 ## Requirements
 
-- Windows 10 or later
+- Windows 10 or newer
 - Node.js 18+
 - Beook desktop application installed with downloaded books
 
@@ -81,10 +81,11 @@ This tool has been tested with the following learning materials:
 
 ## Known Limitations
 
-- Only tested with a limited set of learning materials
+- Only tested with a limited set of learning materials (help welcomed)
 - PDF generation uses Puppeteer (may have performance implications for very large books)
-- Electron app bundles a local Next.js server (no manual server startup needed in releases) (not yet bundled as standalone executable)
+- Electron app bundles a local Next.js server
+- huge installation size
 
 ## License
 This app, "Beook2PDF", is an independent product and is not affiliated with Ionesoft, the publisher and developer of Beook. The use of the word "Beook" does not imply any official approval or partnership with Ionesoft.
-This project is for educational purposes only. Please respect the intellectual property rights of content creators and publishers.
+This project is for personal use only. Please respect the intellectual property rights of content creators and publishers.

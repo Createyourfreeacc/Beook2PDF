@@ -28,16 +28,6 @@ cd beook2pdf
 npm install
 ```
 
-## Build
-
-```bash
-rmdir /s /q node_modules
-del package-lock.json
-setx PUPPETEER_CACHE_DIR ".puppeteer"
-npm install
-powershell -ExecutionPolicy Bypass -File .\tools\clean-dist-win.ps1
-```
-
 ## Usage
 
 ### Web Application
@@ -60,24 +50,28 @@ npm run electron
 
 Note: The Electron app currently connects to `http://localhost:3000`, so you'll need to run `npm run dev` in a separate terminal first.
 
+## Build
+
+```bash
+rmdir /s /q node_modules
+del package-lock.json
+setx PUPPETEER_CACHE_DIR ".puppeteer"
+npm install
+powershell -ExecutionPolicy Bypass -File .\tools\clean-dist-win.ps1
+```
+
 ## Tested Courses
 
 This tool has been tested with the following learning materials:
 
-| Reference |
-|------|
-| 978-3-905036-87-9 |
-| 978-3-03901-007-3 |
-| 978-3-905036-95-4 |
-| 978-3-03901-002-8 |
-| 978-3-03901-000-4 |
-| 978-3-03901-011-0 |
-| 978-3-03901-004-2 |
-| 978-3-03901-003-5 |
-| 978-3-905036-94-7 |
-| 978-3-905036-96-1 |
-| 978-3-03901-015-8 |
-| 978-3-905036-88-6 |
+| Reference | |
+|------|------|
+| 978-3-905036-87-9 | 978-3-03901-007-3 |
+| 978-3-905036-95-4 | 978-3-03901-002-8 |
+| 978-3-03901-011-0 | 978-3-03901-000-4 |
+| 978-3-03901-003-5 | 978-3-03901-004-2 |
+| 978-3-905036-94-7 | 978-3-905036-96-1 |
+| 978-3-905036-88-6 | 978-3-03901-015-8 |
 
 ## Known Limitations
 

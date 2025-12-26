@@ -64,21 +64,19 @@ powershell -ExecutionPolicy Bypass -File .\tools\clean-dist-win.ps1
 
 This tool has been tested with the following learning materials:
 
-| Reference | |
-|------|------|
-| 978-3-905036-87-9 | 978-3-03901-007-3 |
-| 978-3-905036-95-4 | 978-3-03901-002-8 |
-| 978-3-03901-011-0 | 978-3-03901-000-4 |
-| 978-3-03901-003-5 | 978-3-03901-004-2 |
-| 978-3-905036-94-7 | 978-3-905036-96-1 |
-| 978-3-905036-88-6 | 978-3-03901-015-8 |
+| Reference | | |
+|------|------|------|
+| 978-3-905036-87-9 | 978-3-03901-007-3 | 978-3-03901-002-8 |
+| 978-3-905036-95-4 | 978-3-03901-011-0 | 978-3-03901-000-4 |
+| 978-3-03901-003-5 | 978-3-03901-004-2 | 978-3-905036-96-1 |
+| 978-3-905036-94-7 | 978-3-905036-88-6 | 978-3-03901-015-8 |
+
 
 ## Known Limitations
 
 - Only tested with a limited set of learning materials (help welcomed)
 - PDF generation uses Puppeteer (may have performance implications for very large books)
-- Electron app bundles a local Next.js server
-- huge installation size
+- huge installer/installation size
 
 ## License
 This app, "Beook2PDF", is an independent product and is not affiliated with Ionesoft, the publisher and developer of Beook. The use of the word "Beook" does not imply any official approval or partnership with Ionesoft.

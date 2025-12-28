@@ -2,8 +2,6 @@
 
 A Windows application that exports content from the DRM-protected Beook e-learning platform to PDF format.
 
-> ⚠️ **Work in Progress** — This project is under development and may not work for all users.
-
 <div align="center">
 
   Check this out
@@ -12,6 +10,8 @@ A Windows application that exports content from the DRM-protected Beook e-learni
 <a href="https://discord.gg/6CKPwv5h"><img alt="Discord Server" height="56" src="https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/cozy/social/discord-plural_vector.svg"></a>
 
 </div>
+
+> ⚠️ **Work in Progress** — This project is under development and may not work for all users.
 
 ## Features
 

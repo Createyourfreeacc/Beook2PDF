@@ -1,6 +1,6 @@
 # Beook2PDF
 
-A Windows application that exports content from the DRM-protected Beook e-learning platform to PDF format.
+A Windows application that exports content from the DRM-protected Beook e-learning platform to PDF.
 
 <div align="center">
 

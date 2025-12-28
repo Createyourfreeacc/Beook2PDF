@@ -11,8 +11,6 @@ A Windows application that exports content from the DRM-protected Beook e-learni
 
 </div>
 
-> ⚠️ **Work in Progress** — This project is under development and may not work for all users.
-
 ## Features
 
 ### Core Functionality
@@ -22,6 +20,8 @@ A Windows application that exports content from the DRM-protected Beook e-learni
 - **Quiz Integration**: Decrypts and exports quiz questions and answers directly into PDFs
 - **Interactive Quiz Viewer**: Browse and practice quizzes with solution checking
 - **Custom Quiz Management**: Create and manage your own quiz questions
+
+> ⚠️ **Work in Progress** — This project is under development and may not work for all users.
 
 ## Requirements
 
